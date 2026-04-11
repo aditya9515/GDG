@@ -1,0 +1,14 @@
+{
+  "name": "smart-resource-allocation",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Judge-ready Smart Resource Allocation prototype for disaster relief and emergency healthcare.",
+  "scripts": {
+    "dev:web": "npm --prefix web run dev",
+    "dev:api": "uv run --directory api --project . uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "test:web": "npm --prefix web run test",
+    "test:api": "uv run --directory api --project . pytest tests",
+    "test": "npm run test:web && npm run test:api",
+    "eval": "uv run --directory api --project . python ..\\eval\\run_eval.py"
+  }
+}

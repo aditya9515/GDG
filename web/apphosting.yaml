@@ -1,0 +1,10 @@
+runConfig:
+  cpu: 1
+  memoryMiB: 1024
+  minInstances: 0
+  maxInstances: 2
+env:
+  - variable: NEXT_PUBLIC_API_BASE_URL
+    value: https://your-cloud-run-service-url
+  - variable: NEXT_PUBLIC_ENABLE_DEMO_AUTH
+    value: "false"

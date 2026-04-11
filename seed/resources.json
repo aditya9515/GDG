@@ -1,0 +1,66 @@
+[
+  {
+    "resource_id": "RES-001",
+    "resource_type": "RESCUE_BOAT",
+    "quantity_available": 2,
+    "location_label": "Shantinagar Depot",
+    "location": { "lat": 22.57, "lng": 88.36 },
+    "constraints": ["REQUIRES_BOAT_OPERATOR"]
+  },
+  {
+    "resource_id": "RES-002",
+    "resource_type": "AMBULANCE",
+    "quantity_available": 3,
+    "location_label": "District Hospital Bay",
+    "location": { "lat": 28.6139, "lng": 77.2090 },
+    "constraints": ["REQUIRES_DRIVER"]
+  },
+  {
+    "resource_id": "RES-003",
+    "resource_type": "WATER_TANKER",
+    "quantity_available": 2,
+    "location_label": "Municipal Yard",
+    "location": { "lat": 22.61, "lng": 88.41 },
+    "constraints": ["REQUIRES_DRIVER_WITH_HEAVY_LICENSE"]
+  },
+  {
+    "resource_id": "RES-004",
+    "resource_type": "CHLORINE_TABLETS",
+    "quantity_available": 120,
+    "location_label": "WASH Store",
+    "location": { "lat": 22.61, "lng": 88.41 },
+    "constraints": []
+  },
+  {
+    "resource_id": "RES-005",
+    "resource_type": "TARPAULINS",
+    "quantity_available": 75,
+    "location_label": "Coastal Depot",
+    "location": { "lat": 15.49, "lng": 73.82 },
+    "constraints": []
+  },
+  {
+    "resource_id": "RES-006",
+    "resource_type": "BLANKETS",
+    "quantity_available": 90,
+    "location_label": "Shelter Store",
+    "location": { "lat": 15.49, "lng": 73.82 },
+    "constraints": []
+  },
+  {
+    "resource_id": "RES-007",
+    "resource_type": "OXYGEN_CONCENTRATOR",
+    "quantity_available": 4,
+    "location_label": "Medical Storage",
+    "location": { "lat": 13.08, "lng": 80.27 },
+    "constraints": ["POWER_BACKUP_REQUIRED"]
+  },
+  {
+    "resource_id": "RES-008",
+    "resource_type": "ORS_PACKETS",
+    "quantity_available": 300,
+    "location_label": "Camp Pharmacy",
+    "location": { "lat": 22.61, "lng": 88.41 },
+    "constraints": []
+  }
+]

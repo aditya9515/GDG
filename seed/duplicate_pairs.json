@@ -1,0 +1,50 @@
+[
+  {
+    "link_id": "dup-seed-001",
+    "case_id": "DR-013",
+    "other_case_id": "DR-001",
+    "similarity": 0.91,
+    "decision": "POSSIBLE_DUPLICATE",
+    "geo_distance_km": 1.4
+  },
+  {
+    "link_id": "dup-seed-002",
+    "case_id": "DR-003",
+    "other_case_id": "DR-018",
+    "similarity": 0.9,
+    "decision": "LIKELY_DUPLICATE",
+    "geo_distance_km": 0.8
+  },
+  {
+    "link_id": "dup-seed-003",
+    "case_id": "DR-006",
+    "other_case_id": "DR-011",
+    "similarity": 0.89,
+    "decision": "POSSIBLE_DUPLICATE",
+    "geo_distance_km": 1.9
+  },
+  {
+    "link_id": "dup-seed-004",
+    "case_id": "HE-005",
+    "other_case_id": "DR-011",
+    "similarity": 0.88,
+    "decision": "POSSIBLE_DUPLICATE",
+    "geo_distance_km": 1.6
+  },
+  {
+    "link_id": "dup-seed-005",
+    "case_id": "DR-004",
+    "other_case_id": "DR-017",
+    "similarity": 0.9,
+    "decision": "POSSIBLE_DUPLICATE",
+    "geo_distance_km": 1.2
+  },
+  {
+    "link_id": "dup-seed-006",
+    "case_id": "HE-010",
+    "other_case_id": "DR-020",
+    "similarity": 0.93,
+    "decision": "LIKELY_DUPLICATE",
+    "geo_distance_km": 0.6
+  }
+]

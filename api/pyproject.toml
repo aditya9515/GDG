@@ -1,0 +1,27 @@
+[project]
+name = "reliefops-api"
+version = "0.1.0"
+description = "FastAPI backend for Smart Resource Allocation"
+readme = "../README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.8.0",
+  "httpx>=0.28.0",
+  "python-multipart>=0.0.20",
+  "google-genai>=1.10.0",
+  "google-cloud-firestore>=2.20.0",
+  "firebase-admin>=6.7.0"
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=1.0.0"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
