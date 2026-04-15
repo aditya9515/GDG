@@ -18,3 +18,21 @@ api/.coverage
 api/.ruff_cache/
 web/.vercel/
 web/firebase-debug.log
+
+# Firebase local state/logs
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# Local Firebase aliases (optional: ignore if you don't want personal aliases committed)
+.firebaserc
+
+# GCP/Firebase service-account keys (very important)
+*firebase-adminsdk-*.json
+*service-account*.json
+*.p12
+*.pem
+
+# Env variants that may appear
+.env.*
+!.env.example
