@@ -7,18 +7,22 @@ from app.repositories.base import Repository
 from app.repositories.firestore import FirestoreRepository
 from app.repositories.memory import MemoryRepository
 from app.services.duplicates import DuplicateService
+from app.services.agent_graphs import AgentGraphService
+from app.services.docling_parser import DoclingParserService
 from app.services.extractor import ExtractionService
 from app.services.geocoding import GeocodingService
 from app.services.matching import MatchingService
 from app.services.routing import RoutingService
 from app.services.scoring import ScoringService
+from app.services.storage_bridge import StorageBridgeService
 from app.services.tokens import TokenService
+from app.services.vectors import VectorService
 
 
 @lru_cache(maxsize=1)
 def get_repository() -> Repository:
     settings = get_settings()
-    if settings.repository_backend == "firestore":
+    if settings.resolved_repository_backend == "firestore":
         return FirestoreRepository(settings=settings)
     return MemoryRepository()
 
@@ -35,7 +39,7 @@ def get_scoring_service() -> ScoringService:
 
 @lru_cache(maxsize=1)
 def get_geocoding_service() -> GeocodingService:
-    return GeocodingService(settings=get_settings())
+    return GeocodingService(settings=get_settings(), repository=get_repository())
 
 
 @lru_cache(maxsize=1)
@@ -56,3 +60,31 @@ def get_routing_service() -> RoutingService:
 @lru_cache(maxsize=1)
 def get_token_service() -> TokenService:
     return TokenService()
+
+
+@lru_cache(maxsize=1)
+def get_docling_parser_service() -> DoclingParserService:
+    return DoclingParserService()
+
+
+@lru_cache(maxsize=1)
+def get_vector_service() -> VectorService:
+    return VectorService(settings=get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_agent_graph_service() -> AgentGraphService:
+    return AgentGraphService(
+        repository=get_repository(),
+        docling=get_docling_parser_service(),
+        extractor=get_extraction_service(),
+        scorer=get_scoring_service(),
+        matcher=get_matching_service(),
+        token_service=get_token_service(),
+        vector_service=get_vector_service(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_storage_bridge_service() -> StorageBridgeService:
+    return StorageBridgeService(settings=get_settings())

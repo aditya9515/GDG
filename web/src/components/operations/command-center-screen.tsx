@@ -20,6 +20,7 @@ import {
   listTeams,
   scoreIncident,
 } from '@/lib/api'
+import { csvTextToFile, parseCsvPreview, type CsvPreview } from '@/lib/csv-preview'
 import type { AssignmentDecision, CaseRecord, DashboardSummary, IngestionJob, ResourceInventory, Team } from '@/lib/types'
 
 type LoadState = {
@@ -48,6 +49,9 @@ export function CommandCenterScreen() {
   const [importKind, setImportKind] = useState<'CSV' | 'PDF' | 'IMAGE'>('CSV')
   const [importTarget, setImportTarget] = useState<'incidents' | 'teams' | 'resources'>('incidents')
   const [importFile, setImportFile] = useState<File | null>(null)
+  const [importCsvText, setImportCsvText] = useState('')
+  const [importPreview, setImportPreview] = useState<CsvPreview | null>(null)
+  const [importStep, setImportStep] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) {
@@ -71,7 +75,7 @@ export function CommandCenterScreen() {
       ...state.incidents.slice(0, 10).map((incident) => ({
         id: incident.case_id,
         label: incident.case_id,
-        subtitle: `${incident.urgency} • ${incident.location_text || 'Location pending'}`,
+        subtitle: `${incident.urgency} | ${incident.location_text || 'Location pending'}`,
         tone: 'incident' as const,
         point: incident.geo,
       })),
@@ -134,24 +138,58 @@ export function CommandCenterScreen() {
       return
     }
     setBusy(true)
-    setMessage(`Processing ${importFile.name}...`)
+    setImportStep(`Preparing ${importFile.name}...`)
+    setMessage(null)
     try {
+      const uploadFile =
+        importKind === 'CSV' && importCsvText.trim()
+          ? csvTextToFile(importCsvText, importFile.name.endsWith('.csv') ? importFile.name : `${importFile.name}.csv`)
+          : importFile
       await createIngestionJob(
         {
           kind: importKind,
           target: importTarget,
-          file: importFile,
+          file: uploadFile,
         },
         user,
+        {
+          onProgress: setImportStep,
+        },
       )
       setImportFile(null)
+      setImportCsvText('')
+      setImportPreview(null)
       setMessage(`${importFile.name} imported into ReliefOps.`)
       await refresh()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Import failed.')
     } finally {
+      setImportStep(null)
       setBusy(false)
     }
+  }
+
+  async function handleImportFile(nextFile: File | null) {
+    setImportFile(nextFile)
+    setImportPreview(null)
+    setImportCsvText('')
+    setMessage(null)
+    setImportStep(null)
+    if (!nextFile || importKind !== 'CSV') {
+      return
+    }
+    try {
+      const text = await nextFile.text()
+      setImportCsvText(text)
+      setImportPreview(parseCsvPreview(text))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not read CSV preview.')
+    }
+  }
+
+  function updateCsvText(value: string) {
+    setImportCsvText(value)
+    setImportPreview(parseCsvPreview(value))
   }
 
   return (
@@ -225,12 +263,19 @@ export function CommandCenterScreen() {
 
           <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
             <h2 className="text-lg font-semibold">Quick imports</h2>
-            <p className="mt-1 text-sm text-slate-400">Batch-import incidents, teams, or resources from CSV, or process PDF and image evidence.</p>
+            <p className="mt-1 text-sm text-slate-400">
+              This runs directly from the command center. CSV files show a preview here first; the Imports page is just the full history/review workspace.
+            </p>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               <select
                 className="rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3 text-sm text-stone-100"
                 value={importKind}
-                onChange={(event) => setImportKind(event.target.value as 'CSV' | 'PDF' | 'IMAGE')}
+                onChange={(event) => {
+                  setImportKind(event.target.value as 'CSV' | 'PDF' | 'IMAGE')
+                  setImportFile(null)
+                  setImportCsvText('')
+                  setImportPreview(null)
+                }}
               >
                 <option value="CSV">CSV</option>
                 <option value="PDF">PDF</option>
@@ -250,23 +295,77 @@ export function CommandCenterScreen() {
                   className="hidden"
                   type="file"
                   accept={importKind === 'CSV' ? '.csv' : importKind === 'PDF' ? '.pdf' : 'image/*'}
-                  onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => void handleImportFile(event.target.files?.[0] ?? null)}
                 />
                 {importFile ? importFile.name : 'Choose file'}
               </label>
             </div>
+            {importPreview ? (
+              <div className="mt-4 rounded-2xl border border-white/8 bg-slate-950/55 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-stone-100">CSV preview before commit</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {importPreview.rowCount} rows detected. Edit the CSV text if needed, then press Start import.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-400">
+                    {importTarget}
+                  </span>
+                </div>
+                {importPreview.warnings.length > 0 ? (
+                  <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs text-amber-100">
+                    {importPreview.warnings.join(' ')}
+                  </div>
+                ) : null}
+                <div className="mt-3 max-h-44 overflow-auto rounded-xl border border-white/8">
+                  <table className="w-full min-w-[560px] text-left text-xs">
+                    <thead className="bg-white/5 text-slate-400">
+                      <tr>
+                        {importPreview.headers.map((header) => (
+                          <th key={header} className="px-3 py-2 font-medium">
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.rows.map((row, index) => (
+                        <tr key={`${index}-${JSON.stringify(row)}`} className="border-t border-white/8 text-slate-300">
+                          {importPreview.headers.map((header) => (
+                            <td key={header} className="max-w-56 truncate px-3 py-2">
+                              {row[header]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm text-amber-100">Edit CSV text before import</summary>
+                  <textarea
+                    className="mt-3 min-h-36 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 font-mono text-xs text-stone-100"
+                    value={importCsvText}
+                    onChange={(event) => updateCsvText(event.target.value)}
+                  />
+                </details>
+              </div>
+            ) : null}
             <div className="mt-4 flex items-center gap-3">
               <button
                 className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={busy || !importFile}
                 onClick={() => void submitImport()}
               >
-                Start import
+                {busy ? 'Working...' : importKind === 'CSV' ? 'Start import after preview' : 'Start import'}
               </button>
               <Link className="text-sm text-amber-100 transition hover:text-amber-50" href="/imports">
-                Open import workspace
+                Open full import workspace
               </Link>
             </div>
+            {importStep ? <p className="mt-3 text-sm text-slate-300">{importStep}</p> : null}
+            {message ? <p className="mt-3 text-sm text-slate-300">{message}</p> : null}
           </div>
         </div>
       </section>
@@ -292,7 +391,7 @@ export function CommandCenterScreen() {
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-slate-400">
-                  {dispatch.team_id ?? 'Unassigned team'} • ETA {dispatch.eta_minutes ?? 'Unknown'} min
+                  {dispatch.team_id ?? 'Unassigned team'} | ETA {dispatch.eta_minutes ?? 'Unknown'} min
                 </p>
               </div>
             ))}
@@ -372,7 +471,7 @@ export function CommandCenterScreen() {
                 {job.kind} {'->'} {job.target}
               </p>
               <p className="mt-2 text-xs text-slate-500">
-                {job.success_count} success • {job.warning_count} warnings
+                {job.success_count} success | {job.warning_count} warnings
               </p>
             </div>
           ))}

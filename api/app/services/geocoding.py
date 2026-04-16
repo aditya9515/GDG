@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from app.core.config import Settings
-from app.models.domain import GeoPoint
+from app.models.domain import GeocodeCacheEntry, GeoPoint, LocationConfidence
+from app.repositories.base import Repository
 
 
 KNOWN_LOCATIONS = {
@@ -15,15 +18,36 @@ KNOWN_LOCATIONS = {
 
 
 class GeocodingService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, repository: Repository) -> None:
         self.settings = settings
+        self.repository = repository
+
+    def _cache_key(self, location_text: str) -> str:
+        normalized = re.sub(r"\s+", " ", location_text.strip().lower())
+        normalized = re.sub(r"[^a-z0-9 ,.-]", "", normalized)
+        return normalized
 
     async def geocode(self, location_text: str) -> GeoPoint | None:
         if not location_text or len(location_text.strip()) < 4:
             return None
 
+        cache_key = self._cache_key(location_text)
+        cached = self.repository.get_geocode_cache(cache_key)
+        if cached is not None:
+            return cached.geo
+
         known = KNOWN_LOCATIONS.get(location_text.lower().strip())
         if known:
+            self.repository.save_geocode_cache(
+                GeocodeCacheEntry(
+                    cache_key=cache_key,
+                    query_text=location_text,
+                    formatted_address=location_text,
+                    geo=known,
+                    provider="seeded_known_location",
+                    location_confidence=LocationConfidence.EXACT,
+                )
+            )
             return known
 
         if not self.settings.google_maps_api_key:
@@ -38,5 +62,17 @@ class GeocodingService:
             payload = response.json()
             if not payload.get("results"):
                 return None
-            location = payload["results"][0]["geometry"]["location"]
-            return GeoPoint(lat=location["lat"], lng=location["lng"])
+            result = payload["results"][0]
+            location = result["geometry"]["location"]
+            point = GeoPoint(lat=location["lat"], lng=location["lng"])
+            self.repository.save_geocode_cache(
+                GeocodeCacheEntry(
+                    cache_key=cache_key,
+                    query_text=location_text,
+                    formatted_address=result.get("formatted_address", location_text),
+                    geo=point,
+                    provider="google_geocoding",
+                    location_confidence=LocationConfidence.APPROXIMATE,
+                )
+            )
+            return point

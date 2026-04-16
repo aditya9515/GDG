@@ -1,0 +1,7 @@
+raw_input,category,location_text,severity,required_capabilities,required_resources
+"Flood water rising near Shantinagar bridge. 4 people trapped on rooftop. Need rescue boat and first aid.",RESCUE,"Shantinagar bridge, Patna",5,"WATER_RESCUE,FIRST_AID","RESCUE_BOAT,FIRST_AID_KIT"
+"Fire reported in market lane, smoke spreading, elderly people nearby need evacuation.",PROTECTION,"Market lane, Bhubaneswar",4,"FIRE_RESPONSE,EVACUATION","FIRE_EXTINGUISHER,N95_MASKS"
+"Pregnant woman in labour, roads waterlogged, ambulance cannot reach directly.",MEDICAL,"Low lying ward 7, Guwahati",5,"AMBULANCE,MATERNAL_CARE","AMBULANCE,MEDICAL_KIT"
+"Shelter camp running short of blankets and tarpaulins before night rain.",SHELTER,"Government school relief camp, Cuttack",3,"SHELTER_DISTRIBUTION","BLANKETS,TARPAULINS"
+"Food truck delayed; 220 people in camp have not received dry ration today.",FOOD,"Riverside camp, Vijayawada",3,"LOGISTICS,FOOD_DISTRIBUTION","FOOD_PACKS"
+"Security concern at warehouse gate during distribution, crowd control requested.",SECURITY,"Central depot gate, Kochi",2,"COORDINATION,CROWD_CONTROL","BARRICADES"

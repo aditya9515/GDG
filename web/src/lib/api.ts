@@ -1,8 +1,10 @@
 'use client'
 
-import { API_BASE_URL } from '@/lib/config'
+import { API_BASE_URL, ENABLE_STORAGE_UPLOADS } from '@/lib/config'
+import { uploadFileToStoragePath } from '@/lib/firebase'
 import type {
   AssignmentDecision,
+  AuthSessionResponse,
   CaseDetailResponse,
   CaseRecord,
   DashboardSummary,
@@ -12,6 +14,12 @@ import type {
   ResourceInventory,
   ResourceNeed,
   Team,
+  GraphRun,
+  Organization,
+  OrgInvite,
+  OrgMembership,
+  OrgRole,
+  UploadRegistrationResponse,
   Volunteer,
 } from '@/lib/types'
 
@@ -19,6 +27,13 @@ export interface SessionState {
   uid: string
   email?: string | null
   role: string
+  enabled?: boolean
+  team_scope?: string[]
+  organizations?: Organization[]
+  memberships?: OrgMembership[]
+  active_org_id?: string | null
+  default_org_id?: string | null
+  is_host?: boolean
   token?: string | null
   mode: 'demo' | 'firebase'
 }
@@ -30,11 +45,41 @@ function buildHeaders(session: SessionState | null): HeadersInit {
   if (session.mode === 'demo') {
     return {
       'X-Demo-User': session.uid,
+      ...(session.active_org_id ? { 'X-Org-Id': session.active_org_id } : {}),
     }
   }
   return {
     Authorization: `Bearer ${session.token ?? ''}`,
+    ...(session.active_org_id ? { 'X-Org-Id': session.active_org_id } : {}),
   }
+}
+
+function buildBearerHeaders(token: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const fallback = `Request failed with status ${response.status}`
+  const text = await response.text()
+  if (!text) {
+    return fallback
+  }
+
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown }
+    if (typeof parsed.detail === 'string') {
+      return parsed.detail
+    }
+    if (typeof parsed.message === 'string') {
+      return parsed.message
+    }
+  } catch {
+    return text
+  }
+
+  return text || fallback
 }
 
 async function request<T>(path: string, init: RequestInit = {}, session: SessionState | null = null): Promise<T> {
@@ -49,16 +94,150 @@ async function request<T>(path: string, init: RequestInit = {}, session: Session
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    cache: 'no-store',
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      cache: 'no-store',
+    })
+  } catch (error) {
+    throw new Error(
+      `Cannot reach ReliefOps API at ${API_BASE_URL}. Start the backend with npm run dev:api, verify NEXT_PUBLIC_API_BASE_URL, and restart the web dev server. Original error: ${
+        error instanceof Error ? error.message : 'network request failed'
+      }`,
+    )
+  }
   if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text || `Request failed with status ${response.status}`)
+    throw new Error(await readErrorMessage(response))
   }
   return response.json() as Promise<T>
+}
+
+async function requestWithHeaders<T>(path: string, headersInit: HeadersInit, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers ?? {})
+  Object.entries(headersInit).forEach(([key, value]) => {
+    if (value) {
+      headers.set(key, value)
+    }
+  })
+  if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      cache: 'no-store',
+    })
+  } catch (error) {
+    throw new Error(
+      `Cannot reach ReliefOps API at ${API_BASE_URL}. Start the backend with npm run dev:api, verify NEXT_PUBLIC_API_BASE_URL, and restart the web dev server. Original error: ${
+        error instanceof Error ? error.message : 'network request failed'
+      }`,
+    )
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response))
+  }
+  return response.json() as Promise<T>
+}
+
+export async function getMeWithToken(token: string): Promise<AuthSessionResponse> {
+  return requestWithHeaders<AuthSessionResponse>('/me', buildBearerHeaders(token))
+}
+
+export async function getMe(session: SessionState | null): Promise<AuthSessionResponse> {
+  return request<AuthSessionResponse>('/me', {}, session)
+}
+
+export async function createOrganization(name: string, session: SessionState | null) {
+  return request<{ organization: Organization; membership: OrgMembership }>(
+    '/organizations',
+    { method: 'POST', body: JSON.stringify({ name }) },
+    session,
+  )
+}
+
+export async function listOrganizations(session: SessionState | null) {
+  return request<{ items: Organization[]; memberships: OrgMembership[] }>('/organizations', {}, session)
+}
+
+export async function getOrganizationMembers(orgId: string, session: SessionState | null) {
+  return request<{ organization: Organization; members: OrgMembership[]; invites: OrgInvite[] }>(
+    `/organizations/${orgId}/members`,
+    {},
+    session,
+  )
+}
+
+export async function inviteOrgMember(orgId: string, email: string, role: OrgRole, session: SessionState | null) {
+  return request<{ invite: OrgInvite; status: string }>(
+    `/organizations/${orgId}/invites`,
+    { method: 'POST', body: JSON.stringify({ email, role }) },
+    session,
+  )
+}
+
+export async function updateOrgMember(
+  orgId: string,
+  membershipId: string,
+  payload: { role?: OrgRole; status?: string },
+  session: SessionState | null,
+) {
+  return request<{ member: OrgMembership }>(
+    `/organizations/${orgId}/members/${membershipId}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    session,
+  )
+}
+
+export async function removeOrgMember(orgId: string, membershipId: string, session: SessionState | null) {
+  return request<{ member: OrgMembership; status: string }>(
+    `/organizations/${orgId}/members/${membershipId}`,
+    { method: 'DELETE' },
+    session,
+  )
+}
+
+export async function runGraph1(
+  payload: { source_kind?: string; text: string; target?: string; operator_prompt?: string | null },
+  session: SessionState | null,
+) {
+  return request<{ run: GraphRun }>(
+    '/agent/graph1/run',
+    { method: 'POST', body: JSON.stringify(payload) },
+    session,
+  )
+}
+
+export async function editGraph1(runId: string, prompt: string, draftId: string | null, session: SessionState | null) {
+  return request<{ run: GraphRun }>(
+    `/agent/graph1/run/${runId}/edit`,
+    { method: 'POST', body: JSON.stringify({ prompt, draft_id: draftId }) },
+    session,
+  )
+}
+
+export async function confirmGraph1(runId: string, session: SessionState | null) {
+  return request<{ run: GraphRun }>(`/agent/graph1/run/${runId}/confirm`, { method: 'POST' }, session)
+}
+
+export async function removeGraph1Draft(runId: string, draftId: string, reason: string, session: SessionState | null) {
+  return request<{ run: GraphRun }>(
+    `/agent/graph1/run/${runId}/remove`,
+    { method: 'POST', body: JSON.stringify({ draft_id: draftId, reason }) },
+    session,
+  )
+}
+
+export async function runGraph2(payload: { linked_case_id: string; text?: string }, session: SessionState | null) {
+  return request<{ run: GraphRun }>(
+    '/agent/graph2/run',
+    { method: 'POST', body: JSON.stringify(payload) },
+    session,
+  )
 }
 
 export async function getDashboardSummary(session: SessionState | null): Promise<DashboardSummary> {
@@ -196,13 +375,58 @@ export async function registerUpload(
   payload: { filename: string; content_type: string; size_bytes: number; linked_entity_id?: string | null },
   session: SessionState | null,
 ) {
-  return request('/uploads/register', { method: 'POST', body: JSON.stringify(payload) }, session)
+  return request<UploadRegistrationResponse>(
+    '/uploads/register',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        linked_entity_type: 'INCIDENT',
+      }),
+    },
+    session,
+  )
 }
 
 export async function createIngestionJob(
   payload: { kind: string; target: string; file: File; linked_case_id?: string | null },
   session: SessionState | null,
+  options: { onProgress?: (message: string) => void; forceDirectUpload?: boolean } = {},
 ): Promise<IngestionJob> {
+  const shouldUseStorage =
+    session?.mode === 'firebase' && ENABLE_STORAGE_UPLOADS && payload.kind !== 'CSV' && !options.forceDirectUpload
+
+  if (shouldUseStorage) {
+    options.onProgress?.('Registering Firebase Storage upload...')
+    const registration = await registerUpload(
+      {
+        filename: payload.file.name,
+        content_type: payload.file.type || 'application/octet-stream',
+        size_bytes: payload.file.size,
+        linked_entity_id: payload.linked_case_id ?? null,
+      },
+      session,
+    )
+    options.onProgress?.('Uploading file evidence to Firebase Storage...')
+    await uploadFileToStoragePath(payload.file, registration.storage_path)
+
+    options.onProgress?.('Starting backend document processing...')
+    const form = new FormData()
+    form.append('kind', payload.kind)
+    form.append('target', payload.target)
+    if (payload.linked_case_id) {
+      form.append('linked_case_id', payload.linked_case_id)
+    }
+    form.append('evidence_id', registration.evidence_item.evidence_id)
+    form.append('storage_path', registration.storage_path)
+    form.append('filename', payload.file.name)
+    form.append('content_type', payload.file.type || 'application/octet-stream')
+    const job = await request<IngestionJob>('/ingestion-jobs', { method: 'POST', body: form }, session)
+    options.onProgress?.(`Import ${job.status.toLowerCase()}: ${job.success_count} records created.`)
+    return job
+  }
+
+  options.onProgress?.('Uploading CSV directly to the backend for local processing...')
   const form = new FormData()
   form.append('kind', payload.kind)
   form.append('target', payload.target)
@@ -210,7 +434,9 @@ export async function createIngestionJob(
     form.append('linked_case_id', payload.linked_case_id)
   }
   form.append('file', payload.file)
-  return request<IngestionJob>('/ingestion-jobs', { method: 'POST', body: form }, session)
+  const job = await request<IngestionJob>('/ingestion-jobs', { method: 'POST', body: form }, session)
+  options.onProgress?.(`Import ${job.status.toLowerCase()}: ${job.success_count} records created.`)
+  return job
 }
 
 export async function listIngestionJobs(session: SessionState | null): Promise<IngestionJob[]> {

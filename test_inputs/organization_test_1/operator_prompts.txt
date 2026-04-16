@@ -1,0 +1,11 @@
+Edit prompt 1:
+Correct the location to "Shantinagar bridge, Patna" and add that one child is present.
+
+Edit prompt 2:
+Add resource requirement for N95 masks because smoke exposure is reported.
+
+Remove prompt 1:
+Remove duplicate food distribution draft because it refers to the same riverside camp incident.
+
+Add prompt 1:
+Add a logistics note that a fuel reserve check is required before dispatching the convoy.

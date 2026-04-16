@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from pathlib import Path
 
 from app.models.domain import (
     AssignmentDecision,
+    AuditEvent,
     AvailabilityStatus,
     CaseDetailResponse,
     CaseEvent,
@@ -17,11 +19,19 @@ from app.models.domain import (
     EvidenceItem,
     EvalRunSummary,
     EvidenceStatus,
+    GeocodeCacheEntry,
     GeoPoint,
+    GraphRun,
     IncidentExtraction,
     IngestionJob,
     InfoToken,
     LocationConfidence,
+    MembershipStatus,
+    OrgInvite,
+    Organization,
+    OrgMembership,
+    OrgRole,
+    OrgStatus,
     PriorityRationale,
     Recommendation,
     ResourceInventory,
@@ -30,7 +40,9 @@ from app.models.domain import (
     UploadRegistrationResponse,
     UserContext,
     UserProfile,
+    VectorRecord,
     Volunteer,
+    utcnow,
 )
 from app.repositories.base import Repository
 from app.services.scoring import ScoringService
@@ -38,6 +50,7 @@ from app.services.scoring import ScoringService
 
 ROOT = Path(__file__).resolve().parents[3]
 SEED_DIR = ROOT / "seed"
+DEFAULT_ORG_ID = "org-demo-relief"
 
 
 def _load_json(name: str) -> list[dict]:
@@ -58,6 +71,22 @@ class MemoryRepository(Repository):
         self.info_tokens: dict[str, InfoToken] = {}
         self.evidence_items: dict[str, EvidenceItem] = {}
         self.ingestion_jobs: dict[str, IngestionJob] = {}
+        self.geocode_cache: dict[str, GeocodeCacheEntry] = {}
+        self.organizations = {
+            item["org_id"]: Organization.model_validate(item)
+            for item in _load_json("organizations.json")
+        }
+        self.memberships = {
+            item["membership_id"]: OrgMembership.model_validate(item)
+            for item in _load_json("org_memberships.json")
+        }
+        self.invites = {
+            item["invite_id"]: OrgInvite.model_validate(item)
+            for item in _load_json("org_invites.json")
+        }
+        self.audit_events: dict[str, AuditEvent] = {}
+        self.graph_runs: dict[str, GraphRun] = {}
+        self.vector_records: dict[str, VectorRecord] = {}
         self.users = {
             item["uid"]: UserProfile.model_validate(item)
             for item in _load_json("users.json")
@@ -70,9 +99,44 @@ class MemoryRepository(Repository):
             item["resource_id"]: ResourceInventory.model_validate(item)
             for item in _load_json("resources.json")
         }
+        self._ensure_default_org()
         self.teams = self._build_seed_teams()
         self.scoring_service = ScoringService()
         self._bootstrap_cases()
+
+    def _ensure_default_org(self) -> None:
+        if not self.organizations:
+            self.organizations[DEFAULT_ORG_ID] = Organization(
+                org_id=DEFAULT_ORG_ID,
+                name="Demo Relief NGO",
+                host_uid="demo-coordinator",
+                host_email="demo@reliefops.local",
+                status=OrgStatus.ACTIVE,
+            )
+        for uid, profile in self.users.items():
+            if not profile.default_org_id:
+                profile.default_org_id = DEFAULT_ORG_ID
+            if DEFAULT_ORG_ID not in profile.org_ids:
+                profile.org_ids.append(DEFAULT_ORG_ID)
+            if DEFAULT_ORG_ID not in profile.role_by_org:
+                role = OrgRole.HOST if uid == "demo-coordinator" else OrgRole(str(profile.role))
+                profile.role_by_org[DEFAULT_ORG_ID] = role
+            self.users[uid] = profile
+            membership_id = f"{DEFAULT_ORG_ID}-{uid}"
+            if membership_id not in self.memberships:
+                self.memberships[membership_id] = OrgMembership(
+                    membership_id=membership_id,
+                    org_id=DEFAULT_ORG_ID,
+                    uid=uid,
+                    email=profile.email or f"{uid}@reliefops.local",
+                    role=profile.role_by_org[DEFAULT_ORG_ID],
+                    status=MembershipStatus.ACTIVE,
+                    invited_by="seed-loader",
+                )
+        for volunteer in self.volunteers.values():
+            volunteer.org_id = volunteer.org_id or DEFAULT_ORG_ID
+        for resource in self.resources.values():
+            resource.org_id = resource.org_id or DEFAULT_ORG_ID
 
     def _build_seed_teams(self) -> dict[str, Team]:
         teams: dict[str, Team] = {}
@@ -129,6 +193,7 @@ class MemoryRepository(Repository):
             rationale = self.scoring_service.score(extraction)
             case = CaseRecord(
                 case_id=item["case_id"],
+                org_id=DEFAULT_ORG_ID,
                 incident_id=item["case_id"],
                 raw_input=item["raw_input"],
                 source_channel="SEEDED",
@@ -170,6 +235,7 @@ class MemoryRepository(Repository):
             return
         token = InfoToken(
             token_id=f"tok-{uuid.uuid4().hex[:10]}",
+            org_id=case.org_id,
             token_type="NEED",
             source_kind="SEEDED_CASE",
             source_ref=case.case_id,
@@ -197,6 +263,7 @@ class MemoryRepository(Repository):
     def create_case(self, raw_input: str, source_channel: str, actor: UserContext) -> CaseRecord:
         case = CaseRecord(
             case_id=f"CASE-{uuid.uuid4().hex[:8].upper()}",
+            org_id=actor.active_org_id or DEFAULT_ORG_ID,
             incident_id=None,
             raw_input=raw_input,
             source_channel=source_channel,
@@ -209,6 +276,7 @@ class MemoryRepository(Repository):
         self.record_event(
             CaseEvent(
                 event_id=f"evt-{uuid.uuid4().hex[:10]}",
+                org_id=case.org_id,
                 case_id=case.case_id,
                 event_type="CASE_CREATED",
                 actor_uid=actor.uid,
@@ -219,6 +287,7 @@ class MemoryRepository(Repository):
 
     def list_cases(self, status: str | None = None, urgency: str | None = None) -> list[CaseRecord]:
         items = list(self.cases.values())
+        # Operational lists are org-scoped when the actor has selected an org.
         if status:
             items = [item for item in items if item.status == status]
         if urgency:
@@ -364,6 +433,7 @@ class MemoryRepository(Repository):
         self.record_event(
             CaseEvent(
                 event_id=f"evt-{uuid.uuid4().hex[:10]}",
+                org_id=case.org_id,
                 case_id=case_id,
                 event_type="CASE_MERGED",
                 actor_uid=actor.uid,
@@ -426,13 +496,14 @@ class MemoryRepository(Repository):
         return sorted(items, key=lambda item: item.created_at, reverse=True)
 
     def register_upload(self, payload: UploadRegistrationRequest, actor: UserContext) -> UploadRegistrationResponse:
+        evidence_id = f"evd-{uuid.uuid4().hex[:10]}"
         evidence = EvidenceItem(
-            evidence_id=f"evd-{uuid.uuid4().hex[:10]}",
+            evidence_id=evidence_id,
             source_kind="UPLOAD",
             filename=payload.filename,
             content_type=payload.content_type,
             size_bytes=payload.size_bytes,
-            storage_path=f"memory://uploads/{payload.filename}",
+            storage_path=f"memory://evidence/{actor.uid}/{evidence_id}/{payload.filename}",
             uploaded_by=actor.uid,
             linked_entity_type=payload.linked_entity_type,
             linked_entity_id=payload.linked_entity_id,
@@ -483,3 +554,209 @@ class MemoryRepository(Repository):
 
     def get_user_profile(self, uid: str) -> UserProfile | None:
         return self.users.get(uid)
+
+    def get_user_profile_by_email(self, email: str) -> UserProfile | None:
+        normalized = email.strip().lower()
+        return next(
+            (
+                profile
+                for profile in self.users.values()
+                if profile.email and profile.email.strip().lower() == normalized
+            ),
+            None,
+        )
+
+    def save_user_profile(self, profile: UserProfile) -> UserProfile:
+        self.users[profile.uid] = profile
+        return profile
+
+    def create_organization(self, name: str, actor: UserContext) -> tuple[Organization, OrgMembership]:
+        org_id = f"org-{uuid.uuid4().hex[:10]}"
+        organization = Organization(
+            org_id=org_id,
+            name=name.strip(),
+            host_uid=actor.uid,
+            host_email=actor.email,
+        )
+        membership = OrgMembership(
+            membership_id=f"{org_id}-{actor.uid}",
+            org_id=org_id,
+            uid=actor.uid,
+            email=actor.email or f"{actor.uid}@reliefops.local",
+            role=OrgRole.HOST,
+            status=MembershipStatus.ACTIVE,
+            invited_by=actor.uid,
+        )
+        self.organizations[org_id] = organization
+        self.memberships[membership.membership_id] = membership
+        profile = self.users.get(actor.uid) or UserProfile(
+            uid=actor.uid,
+            email=actor.email,
+            role=OrgRole.HOST,
+            enabled=True,
+        )
+        profile.default_org_id = profile.default_org_id or org_id
+        profile.org_ids = list(dict.fromkeys([*profile.org_ids, org_id]))
+        profile.role_by_org[org_id] = OrgRole.HOST
+        profile.role = OrgRole.HOST
+        self.users[profile.uid] = profile
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action="ORG_CREATED",
+                object_ref=org_id,
+                payload={"name": name},
+            )
+        )
+        return organization, membership
+
+    def list_organizations_for_user(self, uid: str, email: str | None = None) -> tuple[list[Organization], list[OrgMembership]]:
+        normalized_email = email.strip().lower() if email else None
+        memberships = [
+            membership
+            for membership in self.memberships.values()
+            if membership.status == MembershipStatus.ACTIVE
+            and (membership.uid == uid or (normalized_email and membership.email.strip().lower() == normalized_email))
+        ]
+        organizations = [self.organizations[item.org_id] for item in memberships if item.org_id in self.organizations]
+        return organizations, memberships
+
+    def get_organization(self, org_id: str) -> Organization | None:
+        return self.organizations.get(org_id)
+
+    def list_org_members(self, org_id: str) -> list[OrgMembership]:
+        return [item for item in self.memberships.values() if item.org_id == org_id and item.status != MembershipStatus.REMOVED]
+
+    def list_org_invites(self, org_id: str) -> list[OrgInvite]:
+        return [item for item in self.invites.values() if item.org_id == org_id and item.status == MembershipStatus.INVITED]
+
+    def get_org_membership(self, org_id: str, uid: str | None = None, email: str | None = None) -> OrgMembership | None:
+        normalized_email = email.strip().lower() if email else None
+        for membership in self.memberships.values():
+            if membership.org_id != org_id or membership.status != MembershipStatus.ACTIVE:
+                continue
+            if uid and membership.uid == uid:
+                return membership
+            if normalized_email and membership.email.strip().lower() == normalized_email:
+                return membership
+        return None
+
+    def create_org_invite(self, org_id: str, email: str, role: OrgRole, actor: UserContext) -> OrgInvite:
+        normalized = email.strip().lower()
+        existing = self.get_org_membership(org_id, email=normalized)
+        if existing is None:
+            membership = OrgMembership(
+                membership_id=f"{org_id}-invite-{uuid.uuid4().hex[:8]}",
+                org_id=org_id,
+                email=normalized,
+                role=role,
+                status=MembershipStatus.ACTIVE,
+                invited_by=actor.uid,
+            )
+            self.memberships[membership.membership_id] = membership
+        invite = OrgInvite(
+            invite_id=f"inv-{uuid.uuid4().hex[:10]}",
+            org_id=org_id,
+            email=normalized,
+            role=role,
+            invited_by=actor.uid,
+        )
+        self.invites[invite.invite_id] = invite
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action="MEMBER_INVITED",
+                object_ref=normalized,
+                payload={"role": role},
+            )
+        )
+        return invite
+
+    def update_org_member(
+        self,
+        org_id: str,
+        membership_id: str,
+        role: OrgRole | None,
+        status: MembershipStatus | None,
+        actor: UserContext,
+    ) -> OrgMembership:
+        membership = self.memberships[membership_id]
+        if membership.org_id != org_id:
+            raise KeyError(membership_id)
+        if role is not None:
+            membership.role = role
+        if status is not None:
+            membership.status = status
+            if status in {MembershipStatus.DISABLED, MembershipStatus.REMOVED}:
+                membership.disabled_at = utcnow()
+        self.memberships[membership_id] = membership
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action="MEMBER_UPDATED",
+                object_ref=membership_id,
+                payload={"role": role, "status": status},
+            )
+        )
+        return membership
+
+    def bind_membership_uid(self, membership: OrgMembership, uid: str) -> OrgMembership:
+        membership.uid = uid
+        membership.status = MembershipStatus.ACTIVE
+        membership.joined_at = membership.joined_at or utcnow()
+        self.memberships[membership.membership_id] = membership
+        return membership
+
+    def record_audit_event(self, event: AuditEvent) -> None:
+        self.audit_events[event.audit_id] = event
+
+    def save_graph_run(self, run: GraphRun) -> GraphRun:
+        run.updated_at = utcnow()
+        self.graph_runs[run.run_id] = run
+        return run
+
+    def get_graph_run(self, run_id: str) -> GraphRun:
+        return self.graph_runs[run_id]
+
+    def save_vector_records(self, records: list[VectorRecord]) -> list[VectorRecord]:
+        for record in records:
+            self.vector_records[record.vector_id] = record
+        return records
+
+    def search_vector_records(self, org_id: str, query_embedding: list[float], limit: int = 8) -> list[VectorRecord]:
+        active = [
+            item
+            for item in self.vector_records.values()
+            if item.org_id == org_id and item.deleted_at is None and item.status == "ACTIVE"
+        ]
+        if not query_embedding:
+            return active[:limit]
+        scored = sorted(
+            active,
+            key=lambda item: self._cosine(query_embedding, item.embedding),
+            reverse=True,
+        )
+        return scored[:limit]
+
+    def _cosine(self, a: list[float], b: list[float]) -> float:
+        if not a or not b or len(a) != len(b):
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        mag_a = math.sqrt(sum(x * x for x in a))
+        mag_b = math.sqrt(sum(y * y for y in b))
+        if mag_a == 0 or mag_b == 0:
+            return 0.0
+        return dot / (mag_a * mag_b)
+
+    def get_geocode_cache(self, cache_key: str) -> GeocodeCacheEntry | None:
+        return self.geocode_cache.get(cache_key)
+
+    def save_geocode_cache(self, entry: GeocodeCacheEntry) -> GeocodeCacheEntry:
+        self.geocode_cache[entry.cache_key] = entry
+        return entry

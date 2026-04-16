@@ -1,0 +1,10 @@
+[
+  {
+    "invite_id": "inv-demo-viewer",
+    "org_id": "org-demo-relief",
+    "email": "viewer@example.com",
+    "role": "VIEWER",
+    "invited_by": "demo-coordinator",
+    "status": "INVITED"
+  }
+]

@@ -115,6 +115,42 @@ class IngestionStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class OrgRole(StrEnum):
+    HOST = "HOST"
+    INCIDENT_COORDINATOR = "INCIDENT_COORDINATOR"
+    MEDICAL_COORDINATOR = "MEDICAL_COORDINATOR"
+    LOGISTICS_LEAD = "LOGISTICS_LEAD"
+    VIEWER = "VIEWER"
+
+
+class OrgStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+
+
+class MembershipStatus(StrEnum):
+    INVITED = "INVITED"
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+    REMOVED = "REMOVED"
+
+
+class GraphRunStatus(StrEnum):
+    RUNNING = "RUNNING"
+    WAITING_FOR_USER = "WAITING_FOR_USER"
+    WAITING_FOR_CONFIRMATION = "WAITING_FOR_CONFIRMATION"
+    COMMITTED = "COMMITTED"
+    FAILED = "FAILED"
+
+
+class DraftRecordType(StrEnum):
+    INCIDENT = "INCIDENT"
+    TEAM = "TEAM"
+    RESOURCE = "RESOURCE"
+    DISPATCH = "DISPATCH"
+    INFO_TOKEN = "INFO_TOKEN"
+
+
 class GeoPoint(BaseModel):
     lat: float
     lng: float
@@ -190,6 +226,7 @@ class Recommendation(BaseModel):
 
 class AssignmentDecision(BaseModel):
     assignment_id: str
+    org_id: str | None = None
     case_id: str
     incident_id: str | None = None
     team_id: str | None = None
@@ -206,6 +243,7 @@ class AssignmentDecision(BaseModel):
 
 class CaseEvent(BaseModel):
     event_id: str
+    org_id: str | None = None
     case_id: str
     event_type: str
     actor_uid: str
@@ -224,6 +262,7 @@ class DuplicateLink(BaseModel):
 
 class TeamMember(BaseModel):
     member_id: str
+    org_id: str | None = None
     team_id: str | None = None
     display_name: str
     role_tags: list[str] = Field(default_factory=list)
@@ -237,6 +276,7 @@ class TeamMember(BaseModel):
 
 class Volunteer(BaseModel):
     volunteer_id: str
+    org_id: str | None = None
     team_id: str | None = None
     display_name: str
     role_tags: list[str] = Field(default_factory=list)
@@ -253,6 +293,7 @@ class Volunteer(BaseModel):
 
 class Team(BaseModel):
     team_id: str
+    org_id: str | None = None
     display_name: str
     capability_tags: list[str] = Field(default_factory=list)
     member_ids: list[str] = Field(default_factory=list)
@@ -270,6 +311,7 @@ class Team(BaseModel):
 
 class ResourceInventory(BaseModel):
     resource_id: str
+    org_id: str | None = None
     owning_team_id: str | None = None
     resource_type: str
     quantity_available: float = Field(ge=0)
@@ -284,6 +326,7 @@ class ResourceInventory(BaseModel):
 
 class EvidenceItem(BaseModel):
     evidence_id: str
+    org_id: str | None = None
     source_kind: str
     filename: str
     content_type: str
@@ -302,6 +345,7 @@ class EvidenceItem(BaseModel):
 
 class InfoToken(BaseModel):
     token_id: str
+    org_id: str | None = None
     token_type: InfoTokenType
     source_kind: str
     source_ref: str
@@ -327,6 +371,7 @@ class InfoToken(BaseModel):
 
 class IngestionJob(BaseModel):
     job_id: str
+    org_id: str | None = None
     kind: IngestionKind
     target: str
     filename: str
@@ -347,15 +392,131 @@ class UserContext(BaseModel):
     uid: str
     email: str | None = None
     role: str
+    team_scope: list[str] = Field(default_factory=list)
+    active_org_id: str | None = None
+    active_org_role: OrgRole | None = None
+    org_ids: list[str] = Field(default_factory=list)
 
 
 class UserProfile(UserContext):
     enabled: bool = True
-    team_scope: list[str] = Field(default_factory=list)
+    default_org_id: str | None = None
+    role_by_org: dict[str, OrgRole] = Field(default_factory=dict)
+
+
+class Organization(BaseModel):
+    org_id: str
+    name: str
+    host_uid: str
+    host_email: str | None = None
+    status: OrgStatus = OrgStatus.ACTIVE
+    settings: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class OrgMembership(BaseModel):
+    membership_id: str
+    org_id: str
+    uid: str | None = None
+    email: str
+    role: OrgRole
+    status: MembershipStatus = MembershipStatus.ACTIVE
+    invited_by: str | None = None
+    joined_at: datetime | None = Field(default_factory=utcnow)
+    disabled_at: datetime | None = None
+
+
+class OrgInvite(BaseModel):
+    invite_id: str
+    org_id: str
+    email: str
+    role: OrgRole
+    invited_by: str
+    status: MembershipStatus = MembershipStatus.INVITED
+    created_at: datetime = Field(default_factory=utcnow)
+    accepted_at: datetime | None = None
+
+
+class AuditEvent(BaseModel):
+    audit_id: str
+    org_id: str | None = None
+    actor_uid: str
+    action: str
+    object_ref: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class SourceArtifact(BaseModel):
+    artifact_id: str
+    org_id: str
+    source_kind: str
+    filename: str | None = None
+    text: str = ""
+    docling_markdown: str | None = None
+    docling_json: dict[str, Any] = Field(default_factory=dict)
+    parse_status: str = "PENDING"
+    parse_warnings: list[str] = Field(default_factory=list)
+    detected_languages: list[str] = Field(default_factory=list)
+    ocr_used: bool = False
+
+
+class RecordDraft(BaseModel):
+    draft_id: str
+    draft_type: DraftRecordType
+    title: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    warnings: list[str] = Field(default_factory=list)
+    frozen: bool = False
+    removed: bool = False
+
+
+class UserQuestion(BaseModel):
+    question_id: str
+    question: str
+    field: str | None = None
+    required: bool = True
+
+
+class GraphRun(BaseModel):
+    run_id: str
+    org_id: str
+    graph_name: str
+    status: GraphRunStatus = GraphRunStatus.RUNNING
+    created_by: str
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    source_artifacts: list[SourceArtifact] = Field(default_factory=list)
+    drafts: list[RecordDraft] = Field(default_factory=list)
+    user_questions: list[UserQuestion] = Field(default_factory=list)
+    user_answers: dict[str, str] = Field(default_factory=dict)
+    needs_user_input: bool = False
+    next_action: str | None = None
+    committed_record_ids: list[str] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+class VectorRecord(BaseModel):
+    vector_id: str
+    org_id: str
+    record_type: str
+    record_id: str
+    token_id: str | None = None
+    embedding: list[float] = Field(default_factory=list)
+    text: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source_refs: list[str] = Field(default_factory=list)
+    status: str = "ACTIVE"
+    version: int = 1
+    created_by: str
+    created_at: datetime = Field(default_factory=utcnow)
+    deleted_at: datetime | None = None
 
 
 class CaseRecord(BaseModel):
     case_id: str
+    org_id: str | None = None
     incident_id: str | None = None
     raw_input: str
     source_channel: str
@@ -462,6 +623,17 @@ class UploadRegistrationResponse(BaseModel):
     storage_path: str
 
 
+class GeocodeCacheEntry(BaseModel):
+    cache_key: str
+    query_text: str
+    formatted_address: str
+    geo: GeoPoint
+    provider: str
+    location_confidence: LocationConfidence = LocationConfidence.APPROXIMATE
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class DispatchListResponse(BaseModel):
     items: list[AssignmentDecision]
 
@@ -516,3 +688,74 @@ class EvalRunSummary(BaseModel):
     critical_mislabels: int
     duplicate_precision: float
     notes: str
+
+
+class AuthSessionResponse(BaseModel):
+    uid: str
+    email: str | None = None
+    role: str
+    enabled: bool
+    team_scope: list[str] = Field(default_factory=list)
+    auth_mode: str
+    repository_backend: str
+    organizations: list[Organization] = Field(default_factory=list)
+    memberships: list[OrgMembership] = Field(default_factory=list)
+    default_org_id: str | None = None
+    active_org_id: str | None = None
+    is_host: bool = False
+
+
+class CreateOrganizationRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+
+
+class OrganizationResponse(BaseModel):
+    organization: Organization
+    membership: OrgMembership
+
+
+class OrganizationsResponse(BaseModel):
+    items: list[Organization]
+    memberships: list[OrgMembership] = Field(default_factory=list)
+
+
+class InviteMemberRequest(BaseModel):
+    email: str
+    role: OrgRole = OrgRole.VIEWER
+
+
+class UpdateMemberRequest(BaseModel):
+    role: OrgRole | None = None
+    status: MembershipStatus | None = None
+
+
+class MembersResponse(BaseModel):
+    organization: Organization
+    members: list[OrgMembership]
+    invites: list[OrgInvite] = Field(default_factory=list)
+
+
+class GraphRunRequest(BaseModel):
+    source_kind: str = "MANUAL_TEXT"
+    text: str = ""
+    target: str = "incidents"
+    linked_case_id: str | None = None
+    operator_prompt: str | None = None
+
+
+class GraphEditRequest(BaseModel):
+    prompt: str = Field(min_length=2)
+    draft_id: str | None = None
+
+
+class GraphRemoveRequest(BaseModel):
+    draft_id: str
+    reason: str | None = None
+
+
+class GraphResumeRequest(BaseModel):
+    answers: dict[str, str] = Field(default_factory=dict)
+
+
+class GraphRunResponse(BaseModel):
+    run: GraphRun

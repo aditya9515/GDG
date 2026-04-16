@@ -1,0 +1,10 @@
+{
+  "image_summary": "Warehouse shelf with boxes labelled FOOD_PACKS and MEDICAL_KIT.",
+  "detected_text": [
+    "FOOD_PACKS - 500",
+    "MEDICAL_KIT - 14",
+    "EXPIRY CHECK REQUIRED"
+  ],
+  "ocr_confidence": 0.82,
+  "warnings": ["Treat quantity as operator-review until stock ledger confirms."]
+}

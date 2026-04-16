@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.core.config import get_settings
 from app.core.dependencies import (
     get_duplicate_service,
     get_extraction_service,
@@ -14,7 +15,7 @@ from app.core.dependencies import (
     get_scoring_service,
     get_token_service,
 )
-from app.core.security import get_current_user
+from app.core.security import get_current_org_user
 from app.models.domain import (
     AssignCaseRequest,
     AssignCaseResponse,
@@ -41,7 +42,7 @@ router = APIRouter(prefix="/cases", tags=["cases"])
 @router.post("", response_model=CreateCaseResponse)
 def create_case(
     payload: CreateCaseRequest,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
     case = repository.create_case(payload.raw_input, payload.source_channel, actor)
@@ -57,21 +58,28 @@ def create_case(
 def list_cases(
     status: str | None = Query(default=None),
     urgency: str | None = Query(default=None),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
-    return CaseListResponse(items=repository.list_cases(status=status, urgency=urgency))
+    items = [
+        item
+        for item in repository.list_cases(status=status, urgency=urgency)
+        if item.org_id in {None, actor.active_org_id}
+    ]
+    return CaseListResponse(items=items)
 
 
 @router.get("/{case_id}", response_model=CaseDetailResponse)
-def get_case(case_id: str):
+def get_case(case_id: str, actor: UserContext = Depends(get_current_org_user)):
     repository = get_repository()
+    _require_case_org(repository.get_case(case_id), actor)
     return repository.get_case_detail(case_id)
 
 
 @router.post("/{case_id}/extract", response_model=ExtractCaseResponse)
 async def extract_case(
     case_id: str,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
     extractor = get_extraction_service()
@@ -80,6 +88,7 @@ async def extract_case(
     token_service = get_token_service()
 
     case = repository.get_case(case_id)
+    _require_case_org(case, actor)
     extraction = extractor.extract(case.raw_input)
     case = repository.save_extraction(
         case_id,
@@ -100,13 +109,19 @@ async def extract_case(
     repository.record_event(
         CaseEvent(
             event_id=f"evt-{uuid.uuid4().hex[:10]}",
+            org_id=case.org_id,
             case_id=case_id,
             event_type="CASE_EXTRACTED",
             actor_uid=actor.uid,
             payload={"confidence": extraction.confidence, "token_count": len(tokens)},
         )
     )
-    duplicates = duplicate_service.find_duplicates(case, repository.list_recent_open_cases(case_id))
+    candidates = [
+        item
+        for item in repository.list_recent_open_cases(case_id)
+        if item.org_id in {None, actor.active_org_id}
+    ]
+    duplicates = duplicate_service.find_duplicates(case, candidates)
     repository.save_duplicate_links(case_id, duplicates)
     return ExtractCaseResponse(
         case_id=case.case_id,
@@ -121,11 +136,12 @@ async def extract_case(
 @router.post("/{case_id}/score", response_model=ScoreCaseResponse)
 def score_case(
     case_id: str,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
     scorer = get_scoring_service()
     case = repository.get_case(case_id)
+    _require_case_org(case, actor)
     if case.extracted_json is None:
         raise HTTPException(status_code=400, detail="Case must be extracted before it can be scored.")
     rationale = scorer.score(case.extracted_json)
@@ -133,6 +149,7 @@ def score_case(
     repository.record_event(
         CaseEvent(
             event_id=f"evt-{uuid.uuid4().hex[:10]}",
+            org_id=case.org_id,
             case_id=case_id,
             event_type="CASE_SCORED",
             actor_uid=actor.uid,
@@ -153,23 +170,26 @@ def score_case(
 async def recommend_case(
     case_id: str,
     max_results: int = 3,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
     matcher = get_matching_service()
     routing = get_routing_service()
+    settings = get_settings()
     case = repository.get_case(case_id)
-    teams = repository.list_teams()
+    _require_case_org(case, actor)
+    teams = [item for item in repository.list_teams() if item.org_id in {None, actor.active_org_id}]
     team_lookup = {item.team_id: item for item in teams}
+    max_results = min(max_results, settings.default_max_recommendations)
     recommendations, reason = matcher.recommend(
         case,
         teams,
-        repository.list_volunteers(),
-        repository.list_resources(),
+        [item for item in repository.list_volunteers() if item.org_id in {None, actor.active_org_id}],
+        [item for item in repository.list_resources() if item.org_id in {None, actor.active_org_id}],
         max_results,
     )
 
-    for recommendation in recommendations:
+    for recommendation in recommendations[: settings.route_candidate_limit]:
         if recommendation.team_id is None:
             continue
         team = team_lookup.get(recommendation.team_id)
@@ -183,6 +203,7 @@ async def recommend_case(
     repository.record_event(
         CaseEvent(
             event_id=f"evt-{uuid.uuid4().hex[:10]}",
+            org_id=case.org_id,
             case_id=case_id,
             event_type="RECOMMENDATIONS_GENERATED",
             actor_uid=actor.uid,
@@ -202,9 +223,11 @@ async def recommend_case(
 def update_case_location(
     case_id: str,
     payload: UpdateLocationRequest,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
+    case = repository.get_case(case_id)
+    _require_case_org(case, actor)
     repository.update_case_location(
         case_id,
         payload.location_text,
@@ -215,6 +238,7 @@ def update_case_location(
     repository.record_event(
         CaseEvent(
             event_id=f"evt-{uuid.uuid4().hex[:10]}",
+            org_id=case.org_id,
             case_id=case_id,
             event_type="LOCATION_CONFIRMED",
             actor_uid=actor.uid,
@@ -233,14 +257,17 @@ def update_case_location(
 def assign_case(
     case_id: str,
     payload: AssignCaseRequest,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
+    case = repository.get_case(case_id)
+    _require_case_org(case, actor)
     recommendation = getattr(repository, "recommendations", {}).get(case_id, [None])[0] if hasattr(repository, "recommendations") else None
     team_id = payload.team_id or (recommendation.team_id if recommendation else None)
     resource_ids = payload.resource_ids or (recommendation.resource_ids if recommendation else [])
     assignment = AssignmentDecision(
         assignment_id=f"asg-{uuid.uuid4().hex[:10]}",
+        org_id=actor.active_org_id,
         case_id=case_id,
         incident_id=case_id,
         team_id=team_id,
@@ -256,6 +283,7 @@ def assign_case(
     repository.record_event(
         CaseEvent(
             event_id=f"evt-{uuid.uuid4().hex[:10]}",
+            org_id=case.org_id,
             case_id=case_id,
             event_type="CASE_ASSIGNED",
             actor_uid=actor.uid,
@@ -273,12 +301,18 @@ def assign_case(
 def merge_case(
     case_id: str,
     payload: MergeCaseRequest,
-    actor: UserContext = Depends(get_current_user),
+    actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
+    _require_case_org(repository.get_case(case_id), actor)
     repository.merge_case(case_id, payload.merge_into_case_id, actor)
     return MergeCaseResponse(
         status="MERGED",
         merged_case_id=payload.merge_into_case_id,
         request_id=f"req-{uuid.uuid4().hex[:12]}",
     )
+
+
+def _require_case_org(case, actor: UserContext) -> None:
+    if case.org_id not in {None, actor.active_org_id}:
+        raise HTTPException(status_code=403, detail="Incident belongs to another organization.")

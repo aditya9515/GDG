@@ -1,0 +1,8 @@
+resource_id,owning_team_id,resource_type,quantity_available,location_label,constraints
+RES-BOAT-1,TEAM-RESCUE-1,RESCUE_BOAT,2,"Patna rescue base","REQUIRES_BOAT_OPERATOR"
+RES-AMB-1,TEAM-MED-1,AMBULANCE,1,"Guwahati health post","REQUIRES_DRIVER"
+RES-MEDKIT-1,TEAM-MED-1,MEDICAL_KIT,14,"Guwahati health post",""
+RES-FOOD-1,TEAM-LOG-1,FOOD_PACKS,500,"Cuttack warehouse",""
+RES-SHELTER-1,TEAM-LOG-1,TARPAULINS,150,"Cuttack warehouse",""
+RES-BLANKET-1,TEAM-LOG-1,BLANKETS,300,"Cuttack warehouse",""
+RES-FUEL-1,TEAM-LOG-1,FUEL,900,"Cuttack warehouse","CONTROLLED_STOCK"

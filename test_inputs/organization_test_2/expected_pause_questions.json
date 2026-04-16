@@ -1,0 +1,16 @@
+{
+  "questions": [
+    {
+      "case": "MISSING LOCATION",
+      "expected_question": "Confirm the exact incident location with an address or map pin before dispatch."
+    },
+    {
+      "case": "CERTIFICATION CONFLICT",
+      "expected_question": "Confirm whether a certified ambulance driver is available or approve alternate transport."
+    },
+    {
+      "case": "DEPLETED RESOURCE",
+      "expected_question": "Confirm alternate stock source or partner escalation."
+    }
+  ]
+}

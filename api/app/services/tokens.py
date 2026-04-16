@@ -25,6 +25,7 @@ class TokenService:
         tokens.append(
             InfoToken(
                 token_id=f"tok-{uuid.uuid4().hex[:12]}",
+                org_id=case.org_id,
                 token_type=InfoTokenType.NEED,
                 source_kind=case.source_channel,
                 source_ref=case.case_id,
@@ -55,6 +56,7 @@ class TokenService:
             tokens.append(
                 InfoToken(
                     token_id=f"tok-{uuid.uuid4().hex[:12]}",
+                    org_id=case.org_id,
                     token_type=InfoTokenType.LOCATION_HINT,
                     source_kind=case.source_channel,
                     source_ref=case.case_id,

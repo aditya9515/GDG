@@ -28,6 +28,10 @@ export type InfoTokenType =
   | 'AVAILABILITY_UPDATE'
 export type IngestionKind = 'MANUAL_TEXT' | 'CSV' | 'PDF' | 'IMAGE'
 export type IngestionStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
+export type OrgRole = 'HOST' | 'INCIDENT_COORDINATOR' | 'MEDICAL_COORDINATOR' | 'LOGISTICS_LEAD' | 'VIEWER'
+export type MembershipStatus = 'INVITED' | 'ACTIVE' | 'DISABLED' | 'REMOVED'
+export type GraphRunStatus = 'RUNNING' | 'WAITING_FOR_USER' | 'WAITING_FOR_CONFIRMATION' | 'COMMITTED' | 'FAILED'
+export type DraftRecordType = 'INCIDENT' | 'TEAM' | 'RESOURCE' | 'DISPATCH' | 'INFO_TOKEN'
 
 export interface GeoPoint {
   lat: number
@@ -188,6 +192,89 @@ export interface CaseRecord {
   source_languages: string[]
 }
 
+export interface Organization {
+  org_id: string
+  name: string
+  host_uid: string
+  host_email: string | null
+  status: string
+  settings: Record<string, unknown>
+  created_at: string
+}
+
+export interface OrgMembership {
+  membership_id: string
+  org_id: string
+  uid: string | null
+  email: string
+  role: OrgRole
+  status: MembershipStatus
+  invited_by: string | null
+  joined_at: string | null
+  disabled_at: string | null
+}
+
+export interface OrgInvite {
+  invite_id: string
+  org_id: string
+  email: string
+  role: OrgRole
+  invited_by: string
+  status: MembershipStatus
+  created_at: string
+  accepted_at: string | null
+}
+
+export interface RecordDraft {
+  draft_id: string
+  draft_type: DraftRecordType
+  title: string
+  payload: Record<string, unknown>
+  confidence: number
+  warnings: string[]
+  frozen: boolean
+  removed: boolean
+}
+
+export interface UserQuestion {
+  question_id: string
+  question: string
+  field: string | null
+  required: boolean
+}
+
+export interface SourceArtifact {
+  artifact_id: string
+  org_id: string
+  source_kind: string
+  filename: string | null
+  text: string
+  docling_markdown: string | null
+  docling_json: Record<string, unknown>
+  parse_status: string
+  parse_warnings: string[]
+  detected_languages: string[]
+  ocr_used: boolean
+}
+
+export interface GraphRun {
+  run_id: string
+  org_id: string
+  graph_name: string
+  status: GraphRunStatus
+  created_by: string
+  created_at: string
+  updated_at: string
+  source_artifacts: SourceArtifact[]
+  drafts: RecordDraft[]
+  user_questions: UserQuestion[]
+  user_answers: Record<string, string>
+  needs_user_input: boolean
+  next_action: string | null
+  committed_record_ids: string[]
+  error_message: string | null
+}
+
 export interface Team {
   team_id: string
   display_name: string
@@ -269,6 +356,13 @@ export interface IngestionJob {
   error_message: string | null
 }
 
+export interface UploadRegistrationResponse {
+  evidence_item: EvidenceItem
+  upload_mode: string
+  upload_url: string | null
+  storage_path: string
+}
+
 export interface DashboardSummary {
   total_cases: number
   open_cases: number
@@ -299,4 +393,19 @@ export interface EvalRunSummary {
   critical_mislabels: number
   duplicate_precision: number
   notes: string
+}
+
+export interface AuthSessionResponse {
+  uid: string
+  email: string | null
+  role: string
+  enabled: boolean
+  team_scope: string[]
+  auth_mode: string
+  repository_backend: string
+  organizations: Organization[]
+  memberships: OrgMembership[]
+  default_org_id: string | null
+  active_org_id: string | null
+  is_host: boolean
 }

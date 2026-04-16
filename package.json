@@ -9,6 +9,8 @@
     "test:web": "npm --prefix web run test",
     "test:api": "uv run --directory api --project . pytest tests",
     "test": "npm run test:web && npm run test:api",
+    "bootstrap:users": "uv run --directory api --project . python -m scripts.bootstrap_users",
+    "provision:operator": "uv run --directory api --project . python -m scripts.provision_operator",
     "eval": "uv run --directory api --project . python ..\\eval\\run_eval.py"
   }
 }

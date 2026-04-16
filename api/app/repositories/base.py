@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 from app.models.domain import (
     AssignmentDecision,
+    AuditEvent,
     CaseDetailResponse,
     CaseEvent,
     CaseRecord,
@@ -11,6 +12,8 @@ from app.models.domain import (
     DuplicateLink,
     EvidenceItem,
     EvalRunSummary,
+    GeocodeCacheEntry,
+    GraphRun,
     IncidentExtraction,
     IngestionJob,
     InfoToken,
@@ -19,10 +22,16 @@ from app.models.domain import (
     ResourceInventory,
     Team,
     LocationConfidence,
+    MembershipStatus,
+    OrgInvite,
+    Organization,
+    OrgMembership,
+    OrgRole,
     UploadRegistrationRequest,
     UploadRegistrationResponse,
     UserContext,
     UserProfile,
+    VectorRecord,
     Volunteer,
 )
 
@@ -133,3 +142,57 @@ class Repository(ABC):
 
     @abstractmethod
     def get_user_profile(self, uid: str) -> UserProfile | None: ...
+
+    @abstractmethod
+    def get_user_profile_by_email(self, email: str) -> UserProfile | None: ...
+
+    @abstractmethod
+    def save_user_profile(self, profile: UserProfile) -> UserProfile: ...
+
+    @abstractmethod
+    def create_organization(self, name: str, actor: UserContext) -> tuple[Organization, OrgMembership]: ...
+
+    @abstractmethod
+    def list_organizations_for_user(self, uid: str, email: str | None = None) -> tuple[list[Organization], list[OrgMembership]]: ...
+
+    @abstractmethod
+    def get_organization(self, org_id: str) -> Organization | None: ...
+
+    @abstractmethod
+    def list_org_members(self, org_id: str) -> list[OrgMembership]: ...
+
+    @abstractmethod
+    def list_org_invites(self, org_id: str) -> list[OrgInvite]: ...
+
+    @abstractmethod
+    def get_org_membership(self, org_id: str, uid: str | None = None, email: str | None = None) -> OrgMembership | None: ...
+
+    @abstractmethod
+    def create_org_invite(self, org_id: str, email: str, role: OrgRole, actor: UserContext) -> OrgInvite: ...
+
+    @abstractmethod
+    def update_org_member(self, org_id: str, membership_id: str, role: OrgRole | None, status: MembershipStatus | None, actor: UserContext) -> OrgMembership: ...
+
+    @abstractmethod
+    def bind_membership_uid(self, membership: OrgMembership, uid: str) -> OrgMembership: ...
+
+    @abstractmethod
+    def record_audit_event(self, event: AuditEvent) -> None: ...
+
+    @abstractmethod
+    def save_graph_run(self, run: GraphRun) -> GraphRun: ...
+
+    @abstractmethod
+    def get_graph_run(self, run_id: str) -> GraphRun: ...
+
+    @abstractmethod
+    def save_vector_records(self, records: list[VectorRecord]) -> list[VectorRecord]: ...
+
+    @abstractmethod
+    def search_vector_records(self, org_id: str, query_embedding: list[float], limit: int = 8) -> list[VectorRecord]: ...
+
+    @abstractmethod
+    def get_geocode_cache(self, cache_key: str) -> GeocodeCacheEntry | None: ...
+
+    @abstractmethod
+    def save_geocode_cache(self, entry: GeocodeCacheEntry) -> GeocodeCacheEntry: ...

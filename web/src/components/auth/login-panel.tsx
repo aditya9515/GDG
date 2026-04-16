@@ -9,7 +9,7 @@ import { ENABLE_DEMO_AUTH, ENABLE_FIREBASE_AUTH } from '@/lib/config'
 
 export function LoginPanel() {
   const router = useRouter()
-  const { loginDemo, loginGoogle } = useAuth()
+  const { error: authError, loginDemo, loginGoogle } = useAuth()
   const [error, setError] = useState<string | null>(null)
   const [pendingMode, setPendingMode] = useState<'demo' | 'google' | null>(null)
 
@@ -75,20 +75,22 @@ export function LoginPanel() {
             >
               {pendingMode === 'google' ? 'Signing in...' : 'Continue with Google'}
             </button>
-            <button
-              className="rounded-2xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/15 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!ENABLE_DEMO_AUTH || pendingMode !== null}
-              onClick={enterDemo}
-            >
-              {pendingMode === 'demo' ? 'Opening demo...' : 'Use seeded demo access'}
-            </button>
+            {ENABLE_DEMO_AUTH ? (
+              <button
+                className="rounded-2xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/15 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={pendingMode !== null}
+                onClick={enterDemo}
+              >
+                {pendingMode === 'demo' ? 'Opening demo...' : 'Use seeded demo access'}
+              </button>
+            ) : null}
           </div>
           {!ENABLE_FIREBASE_AUTH ? (
             <p className="mt-4 text-xs leading-5 text-slate-500">
               Firebase env vars are missing, so Google sign-in is disabled until the hosting project is configured.
             </p>
           ) : null}
-          {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
+          {error || authError ? <p className="mt-4 text-sm text-rose-300">{error ?? authError}</p> : null}
         </div>
       </div>
     </section>

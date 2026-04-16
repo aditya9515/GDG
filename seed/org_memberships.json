@@ -1,0 +1,29 @@
+[
+  {
+    "membership_id": "org-demo-relief-demo-coordinator",
+    "org_id": "org-demo-relief",
+    "uid": "demo-coordinator",
+    "email": "demo@reliefops.local",
+    "role": "HOST",
+    "status": "ACTIVE",
+    "invited_by": "seed-loader"
+  },
+  {
+    "membership_id": "org-demo-relief-demo-medical",
+    "org_id": "org-demo-relief",
+    "uid": "demo-medical",
+    "email": "medical@reliefops.local",
+    "role": "MEDICAL_COORDINATOR",
+    "status": "ACTIVE",
+    "invited_by": "demo-coordinator"
+  },
+  {
+    "membership_id": "org-demo-relief-demo-logistics",
+    "org_id": "org-demo-relief",
+    "uid": "demo-logistics",
+    "email": "logistics@reliefops.local",
+    "role": "LOGISTICS_LEAD",
+    "status": "ACTIVE",
+    "invited_by": "demo-coordinator"
+  }
+]

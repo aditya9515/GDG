@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.core.dependencies import get_repository
+from app.core.security import get_current_user
+from app.models.domain import (
+    CreateOrganizationRequest,
+    InviteMemberRequest,
+    MembersResponse,
+    MembershipStatus,
+    OrganizationResponse,
+    OrganizationsResponse,
+    OrgRole,
+    UpdateMemberRequest,
+    UserContext,
+)
+
+router = APIRouter(prefix="/organizations", tags=["organizations"])
+
+
+@router.post("", response_model=OrganizationResponse)
+def create_organization(payload: CreateOrganizationRequest, actor: UserContext = Depends(get_current_user)):
+    organization, membership = get_repository().create_organization(payload.name, actor)
+    return OrganizationResponse(organization=organization, membership=membership)
+
+
+@router.get("", response_model=OrganizationsResponse)
+def list_organizations(actor: UserContext = Depends(get_current_user)):
+    organizations, memberships = get_repository().list_organizations_for_user(actor.uid, actor.email)
+    return OrganizationsResponse(items=organizations, memberships=memberships)
+
+
+@router.get("/{org_id}", response_model=OrganizationResponse)
+def get_organization(org_id: str, actor: UserContext = Depends(get_current_user)):
+    repository = get_repository()
+    organization = repository.get_organization(org_id)
+    membership = repository.get_org_membership(org_id, uid=actor.uid, email=actor.email)
+    if organization is None or membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+    return OrganizationResponse(organization=organization, membership=membership)
+
+
+@router.get("/{org_id}/members", response_model=MembersResponse)
+def list_members(org_id: str, actor: UserContext = Depends(get_current_user)):
+    repository = get_repository()
+    organization = repository.get_organization(org_id)
+    membership = _require_host(org_id, actor)
+    if organization is None or membership is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found.")
+    return MembersResponse(
+        organization=organization,
+        members=repository.list_org_members(org_id),
+        invites=repository.list_org_invites(org_id),
+    )
+
+
+@router.post("/{org_id}/invites")
+def invite_member(org_id: str, payload: InviteMemberRequest, actor: UserContext = Depends(get_current_user)):
+    _require_host(org_id, actor)
+    invite = get_repository().create_org_invite(org_id, payload.email, payload.role, actor)
+    return {"invite": invite, "status": "INVITED"}
+
+
+@router.patch("/{org_id}/members/{membership_id}")
+def update_member(
+    org_id: str,
+    membership_id: str,
+    payload: UpdateMemberRequest,
+    actor: UserContext = Depends(get_current_user),
+):
+    _require_host(org_id, actor)
+    member = get_repository().update_org_member(org_id, membership_id, payload.role, payload.status, actor)
+    return {"member": member}
+
+
+@router.delete("/{org_id}/members/{membership_id}")
+def remove_member(org_id: str, membership_id: str, actor: UserContext = Depends(get_current_user)):
+    host = _require_host(org_id, actor)
+    if host.membership_id == membership_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Host cannot remove themselves until ownership transfer is implemented.",
+        )
+    member = get_repository().update_org_member(org_id, membership_id, None, MembershipStatus.REMOVED, actor)
+    return {"member": member, "status": "REMOVED"}
+
+
+def _require_host(org_id: str, actor: UserContext):
+    membership = get_repository().get_org_membership(org_id, uid=actor.uid, email=actor.email)
+    if membership is None or membership.status != MembershipStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not belong to this organization.")
+    if membership.role != OrgRole.HOST:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the host can manage organization members.")
+    return membership

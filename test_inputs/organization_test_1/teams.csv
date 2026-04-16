@@ -1,0 +1,6 @@
+team_id,display_name,capability_tags,member_ids,service_radius_km,base_label,current_label
+TEAM-RESCUE-1,"River Rescue Team","RESCUE,WATER_RESCUE,FIRST_AID,EVACUATION","vol-001,vol-002",60,"Patna rescue base","Patna rescue base"
+TEAM-MED-1,"Mobile Medical Team","MEDICAL,FIRST_AID,MATERNAL_CARE,AMBULANCE","vol-003,vol-004",45,"Guwahati health post","Guwahati health post"
+TEAM-FIRE-1,"Fire Response Team","FIRE_RESPONSE,EVACUATION,SMOKE_EXPOSURE","vol-005,vol-006",40,"Bhubaneswar fire station","Bhubaneswar fire station"
+TEAM-LOG-1,"Logistics Convoy","LOGISTICS,FOOD_DISTRIBUTION,SHELTER_DISTRIBUTION","vol-007,vol-008",80,"Cuttack warehouse","Cuttack warehouse"
+TEAM-TRANS-1,"Translation Support Team","TRANSLATION,COMMUNITY_HELPDESK","vol-009",30,"Kochi helpdesk","Kochi helpdesk"

@@ -13,7 +13,9 @@ dependencies = [
   "python-multipart>=0.0.20",
   "google-genai>=1.10.0",
   "google-cloud-firestore>=2.20.0",
-  "firebase-admin>=6.7.0"
+  "google-cloud-storage>=2.19.0",
+  "firebase-admin>=6.7.0",
+  "langgraph>=1.1.6",
 ]
 
 [dependency-groups]

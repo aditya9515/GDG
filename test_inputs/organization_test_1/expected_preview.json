@@ -1,0 +1,19 @@
+{
+  "expected_drafts": [
+    {
+      "draft_type": "INCIDENT",
+      "category": "RESCUE",
+      "severity": 5,
+      "location_required": false
+    },
+    {
+      "draft_type": "TEAM",
+      "capability_tags": ["RESCUE", "WATER_RESCUE", "FIRST_AID"]
+    },
+    {
+      "draft_type": "RESOURCE",
+      "resource_type": "RESCUE_BOAT",
+      "quantity_available": 2
+    }
+  ]
+}

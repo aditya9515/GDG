@@ -17,7 +17,8 @@ const navItems = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { user, logout } = useAuth()
+  const { user, logout, setActiveOrg } = useAuth()
+  const visibleNavItems = user?.is_host ? [...navItems, ['Organization', '/organization']] : navItems
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(249,115,22,0.12),_transparent_40%),linear-gradient(180deg,#0d141c,#111827)] text-stone-100">
@@ -29,7 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <p className="mt-2 text-sm leading-6 text-slate-400">Geo-anchor incidents, teams, and resources for faster dispatch.</p>
           </div>
           <nav className="mt-6 grid gap-2">
-            {navItems.map(([label, href]) => {
+            {visibleNavItems.map(([label, href]) => {
               const active = pathname === href || pathname.startsWith(`${href}/`)
               return (
                 <Link
@@ -47,12 +48,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className="mt-8 rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+            {user?.organizations && user.organizations.length > 0 ? (
+              <label className="mb-4 block text-xs uppercase tracking-[0.2em] text-slate-500">
+                Organization
+                <select
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-stone-100"
+                  value={user.active_org_id ?? ''}
+                  onChange={(event) => setActiveOrg(event.target.value)}
+                >
+                  {user.organizations.map((org) => (
+                    <option key={org.org_id} value={org.org_id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Active operator</p>
             <p className="mt-2 text-sm font-medium text-stone-100">{user?.email ?? user?.uid}</p>
             <p className="mt-1 text-xs text-slate-500">{user?.role}</p>
             <button
               className="mt-4 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-white/20 hover:text-white"
-              onClick={logout}
+              onClick={() => void logout()}
             >
               Sign out
             </button>
