@@ -283,7 +283,7 @@ class MemoryRepository(Repository):
             )
         )
 
-    def create_case(self, raw_input: str, source_channel: str, actor: UserContext) -> CaseRecord:
+    def create_case(self, raw_input: str, source_channel: str, actor: UserContext, source_hash: str | None = None) -> CaseRecord:
         case = CaseRecord(
             case_id=f"CASE-{uuid.uuid4().hex[:8].upper()}",
             org_id=actor.active_org_id or DEFAULT_ORG_ID,
@@ -292,6 +292,7 @@ class MemoryRepository(Repository):
             source_channel=source_channel,
             created_by=actor.uid,
             source_languages=["en"],
+            source_hash=source_hash,
         )
         case.incident_id = case.case_id
         self.cases[case.case_id] = case
@@ -420,6 +421,11 @@ class MemoryRepository(Repository):
     def list_volunteers(self) -> list[Volunteer]:
         return list(self.volunteers.values())
 
+    def save_volunteer(self, volunteer: Volunteer) -> Volunteer:
+        volunteer.updated_at = utcnow()
+        self.volunteers[volunteer.volunteer_id] = volunteer
+        return volunteer
+
     def delete_volunteer(self, volunteer_id: str, actor: UserContext) -> None:
         volunteer = self.volunteers[volunteer_id]
         self._require_org_scope(volunteer.org_id, actor)
@@ -437,6 +443,7 @@ class MemoryRepository(Repository):
         return list(self.resources.values())
 
     def save_team(self, team: Team) -> Team:
+        team.updated_at = utcnow()
         self.teams[team.team_id] = team
         return team
 
@@ -458,6 +465,7 @@ class MemoryRepository(Repository):
         self._record_delete_audit("team", team_id, team.org_id, actor)
 
     def save_resource(self, resource: ResourceInventory) -> ResourceInventory:
+        resource.updated_at = utcnow()
         self.resources[resource.resource_id] = resource
         return resource
 

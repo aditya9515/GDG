@@ -289,6 +289,8 @@ class Volunteer(BaseModel):
     active_assignments: int = 0
     reliability_score: float = Field(ge=0, le=1, default=0.7)
     last_active_iso: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Team(BaseModel):
@@ -307,6 +309,8 @@ class Team(BaseModel):
     reliability_score: float = Field(ge=0, le=1, default=0.8)
     evidence_ids: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ResourceInventory(BaseModel):
@@ -322,6 +326,8 @@ class ResourceInventory(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     image_url: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class EvidenceItem(BaseModel):
@@ -470,6 +476,11 @@ class RecordDraft(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     frozen: bool = False
     removed: bool = False
+    source_row_index: int | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    skipped_reason: str | None = None
+    display_fields: dict[str, Any] = Field(default_factory=dict)
+    map_status: LocationConfidence = LocationConfidence.UNKNOWN
 
 
 class UserQuestion(BaseModel):
@@ -538,11 +549,13 @@ class CaseRecord(BaseModel):
     final_dispatch_id: str | None = None
     hazard_type: str | None = None
     source_languages: list[str] = Field(default_factory=list)
+    source_hash: str | None = None
 
 
 class CreateCaseRequest(BaseModel):
     raw_input: str = Field(min_length=3)
     source_channel: str = "MANUAL"
+    force: bool = False
 
 
 class CreateCaseResponse(BaseModel):
@@ -550,6 +563,45 @@ class CreateCaseResponse(BaseModel):
     incident_id: str | None = None
     status: CaseStatus
     request_id: str
+    duplicate_of: str | None = None
+    warning: str | None = None
+
+
+class CreateTeamRequest(BaseModel):
+    display_name: str = Field(min_length=2)
+    capability_tags: list[str] = Field(default_factory=list)
+    member_ids: list[str] = Field(default_factory=list)
+    service_radius_km: float = Field(default=30, ge=0)
+    base_label: str = "Location pending"
+    base_geo: GeoPoint | None = None
+    current_label: str | None = None
+    current_geo: GeoPoint | None = None
+    availability_status: AvailabilityStatus = AvailabilityStatus.AVAILABLE
+    reliability_score: float = Field(default=0.8, ge=0, le=1)
+
+
+class CreateVolunteerRequest(BaseModel):
+    display_name: str = Field(min_length=2)
+    team_id: str | None = None
+    role_tags: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    home_base_label: str = "Location pending"
+    home_base: GeoPoint | None = None
+    current_geo: GeoPoint | None = None
+    availability_status: AvailabilityStatus = AvailabilityStatus.AVAILABLE
+    max_concurrent_assignments: int = Field(default=1, ge=1)
+    reliability_score: float = Field(default=0.7, ge=0, le=1)
+
+
+class CreateResourceRequest(BaseModel):
+    owning_team_id: str | None = None
+    resource_type: str = Field(min_length=2)
+    quantity_available: float = Field(default=0, ge=0)
+    location_label: str = "Location pending"
+    location: GeoPoint | None = None
+    current_label: str | None = None
+    current_geo: GeoPoint | None = None
+    constraints: list[str] = Field(default_factory=list)
 
 
 class ExtractCaseResponse(BaseModel):
@@ -772,8 +824,9 @@ class GraphRunRequest(BaseModel):
 
 
 class GraphEditRequest(BaseModel):
-    prompt: str = Field(min_length=2)
+    prompt: str | None = Field(default=None, min_length=2)
     draft_id: str | None = None
+    field_updates: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphRemoveRequest(BaseModel):

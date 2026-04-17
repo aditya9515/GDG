@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import uuid
 import re
@@ -380,22 +381,35 @@ class AgentGraphService:
         )
         return {"run": self.repository.save_graph_run(run)}
 
-    def edit_graph_run(self, run_id: str, prompt: str, actor: UserContext, draft_id: str | None = None) -> GraphRun:
+    def edit_graph_run(
+        self,
+        run_id: str,
+        prompt: str,
+        actor: UserContext,
+        draft_id: str | None = None,
+        field_updates: dict[str, Any] | None = None,
+    ) -> GraphRun:
         run = self.repository.get_graph_run(run_id)
         self._require_run_org(run, actor)
         for draft in run.drafts:
             if draft_id is None or draft.draft_id == draft_id:
                 draft.frozen = True
-                if draft.draft_type == DraftRecordType.INCIDENT:
-                    self._reevaluate_incident_draft(draft, prompt)
-                elif draft.draft_type == DraftRecordType.TEAM:
-                    self._reevaluate_team_draft(draft, prompt)
-                elif draft.draft_type == DraftRecordType.RESOURCE:
-                    self._reevaluate_resource_draft(draft, prompt)
-                else:
-                    draft.payload["operator_prompt"] = prompt
-                    draft.warnings = [*draft.warnings, f"Reevaluated with operator prompt: {prompt}"]
-                    draft.confidence = min(1.0, draft.confidence + 0.03)
+                changed_fields: list[str] = []
+                if prompt.strip():
+                    if draft.draft_type == DraftRecordType.INCIDENT:
+                        self._reevaluate_incident_draft(draft, prompt)
+                    elif draft.draft_type == DraftRecordType.TEAM:
+                        self._reevaluate_team_draft(draft, prompt)
+                    elif draft.draft_type == DraftRecordType.RESOURCE:
+                        self._reevaluate_resource_draft(draft, prompt)
+                    else:
+                        draft.payload["operator_prompt"] = prompt
+                        draft.warnings = [*draft.warnings, f"Reevaluated with operator prompt: {prompt}"]
+                        draft.confidence = min(1.0, draft.confidence + 0.03)
+                    changed_fields.append("operator_prompt")
+                changed_fields.extend(self._apply_field_updates(draft, field_updates or {}))
+                draft.changed_fields = list(dict.fromkeys([*draft.changed_fields, *changed_fields]))
+                self._refresh_draft_display(draft)
                 draft.frozen = False
         run.status = GraphRunStatus.WAITING_FOR_CONFIRMATION
         run.next_action = "confirm_or_edit"
@@ -417,9 +431,16 @@ class AgentGraphService:
             if draft.removed:
                 continue
             if draft.draft_type == DraftRecordType.INCIDENT:
-                case = self.repository.create_case(draft.payload.get("raw_input", draft.title), "GRAPH1_CONFIRM", actor)
+                raw_input = draft.payload.get("raw_input", draft.title)
+                source_hash = self._source_hash("INCIDENT", raw_input)
+                duplicate = self._find_duplicate_case(raw_input, source_hash, run.org_id)
+                if duplicate is not None:
+                    draft.warnings = [*draft.warnings, f"Duplicate incident detected; reused {duplicate.case_id}."]
+                    run.committed_record_ids.append(duplicate.case_id)
+                    continue
+                case = self.repository.create_case(raw_input, "GRAPH1_CONFIRM", actor, source_hash=source_hash)
                 extraction = IncidentExtraction.model_validate(
-                    draft.payload.get("extracted") or self.extractor.extract(draft.payload.get("raw_input", draft.title)).model_dump(mode="json")
+                    draft.payload.get("extracted") or self.extractor.extract(raw_input).model_dump(mode="json")
                 )
                 case_status = CaseStatus.NEEDS_REVIEW if extraction.confidence < 0.4 else CaseStatus.EXTRACTED
                 case = self.repository.save_extraction(case.case_id, extraction, case_status)
@@ -677,6 +698,8 @@ class AgentGraphService:
             },
             confidence=extraction.confidence,
             warnings=list(dict.fromkeys(warnings)),
+            display_fields=self._incident_display_fields(extraction, None),
+            map_status=LocationConfidence.UNKNOWN if extraction.data_quality.missing_location else LocationConfidence.APPROXIMATE,
         )
 
     def _drafts_from_csv_text(
@@ -704,21 +727,24 @@ class AgentGraphService:
             if row_key in seen_rows:
                 warnings.append(f"Skipped duplicate row {row_index}.")
                 continue
+            if not self._row_matches_target(cleaned, target):
+                warnings.append(f"Skipped row {row_index}: no {target} fields found.")
+                continue
             seen_rows.add(row_key)
             try:
                 if target == "teams":
-                    drafts.append(self._team_draft_from_row(cleaned, operator_prompt))
+                    drafts.append(self._team_draft_from_row(cleaned, operator_prompt, row_index))
                 elif target == "resources":
-                    drafts.append(self._resource_draft_from_row(cleaned, operator_prompt))
+                    drafts.append(self._resource_draft_from_row(cleaned, operator_prompt, row_index))
                 else:
-                    drafts.append(self._incident_draft_from_row(cleaned, operator_prompt))
+                    drafts.append(self._incident_draft_from_row(cleaned, operator_prompt, row_index))
             except Exception as exc:
                 warnings.append(f"Row {row_index} could not be drafted: {type(exc).__name__}: {exc}")
         if not drafts:
             warnings.append("No usable rows were found in the CSV.")
         return drafts, warnings
 
-    def _incident_draft_from_row(self, row: dict[str, str], operator_prompt: str | None) -> RecordDraft:
+    def _incident_draft_from_row(self, row: dict[str, str], operator_prompt: str | None, row_index: int | None = None) -> RecordDraft:
         raw_input = row.get("raw_input") or row.get("description") or row.get("incident") or " | ".join(row.values())
         if row.get("location_text") and row.get("location_text") not in raw_input:
             raw_input = f"{raw_input}\nLocation: {row['location_text']}"
@@ -775,9 +801,12 @@ class AgentGraphService:
             },
             confidence=extraction.confidence,
             warnings=list(dict.fromkeys([*result.warnings, *extraction.data_quality.needs_followup_questions])),
+            source_row_index=row_index,
+            display_fields=self._incident_display_fields(extraction, geo),
+            map_status=LocationConfidence(location_confidence),
         )
 
-    def _team_draft_from_row(self, row: dict[str, str], operator_prompt: str | None) -> RecordDraft:
+    def _team_draft_from_row(self, row: dict[str, str], operator_prompt: str | None, row_index: int | None = None) -> RecordDraft:
         team_id = row.get("team_id") or f"TEAM-{uuid.uuid4().hex[:8].upper()}"
         capabilities = self._split_tags(row.get("capability_tags") or row.get("skills") or row.get("capabilities"))
         members = self._split_tags(row.get("member_ids"))
@@ -812,9 +841,12 @@ class AgentGraphService:
             },
             confidence=0.78,
             warnings=[] if team.base_label != "Location pending" else ["Team base location is missing."],
+            source_row_index=row_index,
+            display_fields=self._team_display_fields(team),
+            map_status=LocationConfidence.EXACT if (team.current_geo or team.base_geo) else LocationConfidence.UNKNOWN,
         )
 
-    def _resource_draft_from_row(self, row: dict[str, str], operator_prompt: str | None) -> RecordDraft:
+    def _resource_draft_from_row(self, row: dict[str, str], operator_prompt: str | None, row_index: int | None = None) -> RecordDraft:
         resource_id = row.get("resource_id") or f"RES-{uuid.uuid4().hex[:8].upper()}"
         resource = ResourceInventory(
             resource_id=resource_id,
@@ -844,6 +876,9 @@ class AgentGraphService:
             },
             confidence=0.78 if resource.quantity_available > 0 else 0.45,
             warnings=[] if resource.location_label != "Location pending" else ["Resource location is missing."],
+            source_row_index=row_index,
+            display_fields=self._resource_display_fields(resource),
+            map_status=LocationConfidence.EXACT if (resource.current_geo or resource.location) else LocationConfidence.UNKNOWN,
         )
 
     def _questions_for_drafts(self, drafts: list[RecordDraft]) -> list[UserQuestion]:
@@ -894,6 +929,7 @@ class AgentGraphService:
 
     def _reevaluate_team_draft(self, draft: RecordDraft, prompt: str) -> None:
         row = self._stringify_values(draft.payload.get("source_row") or {})
+        self._apply_prompt_patch_to_row(row, prompt, "teams")
         notes = str(row.get("notes") or draft.payload.get("raw_input") or "")
         row["notes"] = self._prune_and_redact(f"{notes}\nOperator correction: {prompt}")
         updated = self._team_draft_from_row(row, prompt)
@@ -904,6 +940,7 @@ class AgentGraphService:
 
     def _reevaluate_resource_draft(self, draft: RecordDraft, prompt: str) -> None:
         row = self._stringify_values(draft.payload.get("source_row") or {})
+        self._apply_prompt_patch_to_row(row, prompt, "resources")
         notes = str(row.get("notes") or draft.payload.get("raw_input") or "")
         row["notes"] = self._prune_and_redact(f"{notes}\nOperator correction: {prompt}")
         updated = self._resource_draft_from_row(row, prompt)
@@ -911,6 +948,155 @@ class AgentGraphService:
         draft.payload = updated.payload
         draft.confidence = min(1.0, updated.confidence + 0.03)
         draft.warnings = [*updated.warnings, f"Reevaluated with operator prompt: {prompt}"]
+
+    def _row_matches_target(self, row: dict[str, str], target: str) -> bool:
+        keys = {key.strip().lower() for key, value in row.items() if str(value or "").strip()}
+        incident_keys = {"raw_input", "description", "incident", "category", "location_text", "required_resources", "severity"}
+        team_keys = {"team_id", "display_name", "name", "capability_tags", "skills", "capabilities", "base_label", "member_ids", "service_radius_km"}
+        resource_keys = {"resource_id", "resource_type", "category", "quantity_available", "quantity", "location_label", "owning_team_id", "constraints"}
+        if target == "teams":
+            return bool(keys & team_keys)
+        if target == "resources":
+            return bool(keys & resource_keys)
+        return bool(keys & incident_keys)
+
+    def _apply_prompt_patch_to_row(self, row: dict[str, str], prompt: str, target: str) -> None:
+        lowered = prompt.lower()
+        if target == "teams":
+            name = self._extract_prompt_value(prompt, ["name", "team name", "display name"])
+            location = self._extract_prompt_value(prompt, ["location", "base", "base label"])
+            capabilities = self._extract_prompt_value(prompt, ["capabilities", "capability", "skills"])
+            radius = self._extract_prompt_number(prompt, ["radius", "service radius"])
+            if name:
+                row["display_name"] = name
+            if location:
+                row["base_label"] = location
+            if capabilities:
+                row["capability_tags"] = capabilities
+            if radius is not None:
+                row["service_radius_km"] = str(radius)
+        elif target == "resources":
+            resource_type = self._extract_prompt_value(prompt, ["resource type", "type", "name"])
+            location = self._extract_prompt_value(prompt, ["location", "depot", "warehouse"])
+            constraints = self._extract_prompt_value(prompt, ["constraints", "constraint"])
+            quantity = self._extract_prompt_number(prompt, ["quantity", "stock", "count"])
+            if resource_type:
+                row["resource_type"] = resource_type
+            if location:
+                row["location_label"] = location
+            if constraints:
+                row["constraints"] = constraints
+            if quantity is not None:
+                row["quantity_available"] = str(quantity)
+
+    def _extract_prompt_value(self, prompt: str, labels: list[str]) -> str | None:
+        for label in labels:
+            pattern = rf"{re.escape(label)}\s*(?:to|=|:)\s*([^.;\n]+)"
+            match = re.search(pattern, prompt, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def _extract_prompt_number(self, prompt: str, labels: list[str]) -> float | None:
+        for label in labels:
+            pattern = rf"{re.escape(label)}\s*(?:to|=|:)?\s*(-?\d+(?:\.\d+)?)"
+            match = re.search(pattern, prompt, flags=re.IGNORECASE)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    return None
+        return None
+
+    def _incident_display_fields(self, extraction: IncidentExtraction, geo: GeoPoint | None) -> dict[str, Any]:
+        return {
+            "category": extraction.category,
+            "subcategory": extraction.subcategory,
+            "urgency": extraction.urgency,
+            "location_text": extraction.location_text,
+            "people_affected": extraction.people_affected,
+            "time_to_act_hours": extraction.time_to_act_hours,
+            "resources": [item.model_dump(mode="json") for item in extraction.required_resources],
+            "geo": geo.model_dump(mode="json") if geo else None,
+        }
+
+    def _team_display_fields(self, team: Team) -> dict[str, Any]:
+        return {
+            "team_id": team.team_id,
+            "display_name": team.display_name,
+            "capability_tags": team.capability_tags,
+            "base_label": team.base_label,
+            "availability_status": team.availability_status,
+            "geo": (team.current_geo or team.base_geo).model_dump(mode="json") if (team.current_geo or team.base_geo) else None,
+        }
+
+    def _resource_display_fields(self, resource: ResourceInventory) -> dict[str, Any]:
+        return {
+            "resource_id": resource.resource_id,
+            "resource_type": resource.resource_type,
+            "quantity_available": resource.quantity_available,
+            "location_label": resource.location_label,
+            "owning_team_id": resource.owning_team_id,
+            "geo": (resource.current_geo or resource.location).model_dump(mode="json") if (resource.current_geo or resource.location) else None,
+        }
+
+    def _apply_field_updates(self, draft: RecordDraft, updates: dict[str, Any]) -> list[str]:
+        changed: list[str] = []
+        for raw_path, value in updates.items():
+            path = raw_path[8:] if raw_path.startswith("payload.") else raw_path
+            if not path:
+                continue
+            self._set_path(draft.payload, path.split("."), value)
+            changed.append(path)
+        return changed
+
+    def _set_path(self, target: dict[str, Any], parts: list[str], value: Any) -> None:
+        current: dict[str, Any] = target
+        for part in parts[:-1]:
+            next_value = current.get(part)
+            if not isinstance(next_value, dict):
+                next_value = {}
+                current[part] = next_value
+            current = next_value
+        current[parts[-1]] = value
+
+    def _refresh_draft_display(self, draft: RecordDraft) -> None:
+        try:
+            if draft.draft_type == DraftRecordType.INCIDENT:
+                extraction = IncidentExtraction.model_validate(draft.payload.get("extracted"))
+                geo_payload = draft.payload.get("geo")
+                geo = GeoPoint.model_validate(geo_payload) if isinstance(geo_payload, dict) else None
+                draft.title = f"{extraction.category} - {extraction.location_text or 'Location pending'}"
+                draft.display_fields = self._incident_display_fields(extraction, geo)
+                draft.map_status = LocationConfidence.EXACT if geo else LocationConfidence(draft.payload.get("location_confidence", "UNKNOWN"))
+            elif draft.draft_type == DraftRecordType.TEAM:
+                team = Team.model_validate(draft.payload.get("team"))
+                draft.title = f"{team.display_name} ({', '.join(team.capability_tags[:2])})"
+                draft.display_fields = self._team_display_fields(team)
+                draft.map_status = LocationConfidence.EXACT if (team.current_geo or team.base_geo) else LocationConfidence.UNKNOWN
+            elif draft.draft_type == DraftRecordType.RESOURCE:
+                resource = ResourceInventory.model_validate(draft.payload.get("resource"))
+                draft.title = f"{resource.resource_type} ({resource.quantity_available:g} available)"
+                draft.display_fields = self._resource_display_fields(resource)
+                draft.map_status = LocationConfidence.EXACT if (resource.current_geo or resource.location) else LocationConfidence.UNKNOWN
+        except Exception:
+            draft.warnings = [*draft.warnings, "Draft display could not be refreshed after edits."]
+
+    def _source_hash(self, record_type: str, raw: str) -> str:
+        normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", f"{record_type}:{raw}".lower())).strip()
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    def _find_duplicate_case(self, raw_input: str, source_hash: str, org_id: str) -> Any | None:
+        normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", raw_input.lower())).strip()
+        for case in self.repository.list_cases():
+            if case.org_id != org_id:
+                continue
+            if case.source_hash and case.source_hash == source_hash:
+                return case
+            existing = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", case.raw_input.lower())).strip()
+            if existing == normalized:
+                return case
+        return None
 
     def _split_tags(self, value: str | None) -> list[str]:
         if not value:
@@ -939,7 +1125,14 @@ class AgentGraphService:
                 ]
             )
         else:
-            candidates.extend([("lat", "lng"), ("latitude", "longitude")])
+            candidates.extend(
+                [
+                    ("lat", "lng"),
+                    ("latitude", "longitude"),
+                    ("location_lat", "location_lng"),
+                    ("location_latitude", "location_longitude"),
+                ]
+            )
         for lat_key, lng_key in candidates:
             lat_raw = row.get(lat_key)
             lng_raw = row.get(lng_key)

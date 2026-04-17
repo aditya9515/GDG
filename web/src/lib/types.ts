@@ -190,6 +190,7 @@ export interface CaseRecord {
   final_dispatch_id: string | null
   hazard_type: string | null
   source_languages: string[]
+  source_hash?: string | null
 }
 
 export interface Organization {
@@ -234,6 +235,11 @@ export interface RecordDraft {
   warnings: string[]
   frozen: boolean
   removed: boolean
+  source_row_index?: number | null
+  changed_fields?: string[]
+  skipped_reason?: string | null
+  display_fields?: Record<string, unknown>
+  map_status?: LocationConfidence
 }
 
 export interface UserQuestion {
@@ -300,6 +306,8 @@ export interface Team {
   reliability_score: number
   evidence_ids: string[]
   notes: string[]
+  created_at?: string
+  updated_at?: string
 }
 
 export interface Volunteer {
@@ -316,6 +324,8 @@ export interface Volunteer {
   active_assignments: number
   reliability_score: number
   last_active_iso: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface ResourceInventory {
@@ -330,6 +340,8 @@ export interface ResourceInventory {
   constraints: string[]
   evidence_ids: string[]
   image_url: string | null
+  created_at?: string
+  updated_at?: string
 }
 
 export interface AssignmentDecision {

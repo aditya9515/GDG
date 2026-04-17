@@ -5,7 +5,7 @@ import io
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.core.dependencies import (
     get_extraction_service,
@@ -20,6 +20,9 @@ from app.core.security import get_current_org_user, get_current_user
 from app.models.domain import (
     AuthSessionResponse,
     CaseEvent,
+    CreateResourceRequest,
+    CreateTeamRequest,
+    CreateVolunteerRequest,
     DeleteResponse,
     DispatchListResponse,
     EvidenceStatus,
@@ -37,6 +40,7 @@ from app.models.domain import (
     UploadRegistrationResponse,
     UserContext,
     VolunteersResponse,
+    Volunteer,
     ResourceInventory,
 )
 
@@ -66,8 +70,28 @@ def get_session_profile(actor: UserContext = Depends(get_current_user)):
 
 
 @router.get("/teams", response_model=TeamsResponse)
-def list_teams(actor: UserContext = Depends(get_current_org_user)):
-    return TeamsResponse(items=[item for item in get_repository().list_teams() if item.org_id == actor.active_org_id])
+def list_teams(q: str | None = Query(default=None), actor: UserContext = Depends(get_current_org_user)):
+    items = [item for item in get_repository().list_teams() if item.org_id == actor.active_org_id]
+    return TeamsResponse(items=_sort_newest(_filter_items(items, q, ["team_id", "display_name", "base_label", "current_label", "capability_tags"])))
+
+
+@router.post("/teams", response_model=Team)
+def create_team(payload: CreateTeamRequest, actor: UserContext = Depends(get_current_org_user)):
+    team = Team(
+        team_id=f"TEAM-{uuid.uuid4().hex[:8].upper()}",
+        org_id=actor.active_org_id,
+        display_name=payload.display_name.strip(),
+        capability_tags=_normalize_tags(payload.capability_tags),
+        member_ids=payload.member_ids,
+        service_radius_km=payload.service_radius_km,
+        base_label=payload.base_label,
+        base_geo=payload.base_geo,
+        current_label=payload.current_label or payload.base_label,
+        current_geo=payload.current_geo or payload.base_geo,
+        availability_status=payload.availability_status,
+        reliability_score=payload.reliability_score,
+    )
+    return get_repository().save_team(team)
 
 
 @router.delete("/teams/{team_id}", response_model=DeleteResponse)
@@ -82,8 +106,34 @@ def delete_team(team_id: str, actor: UserContext = Depends(get_current_org_user)
 
 
 @router.get("/volunteers", response_model=VolunteersResponse)
-def list_volunteers(actor: UserContext = Depends(get_current_org_user)):
-    return VolunteersResponse(items=[item for item in get_repository().list_volunteers() if item.org_id == actor.active_org_id])
+def list_volunteers(q: str | None = Query(default=None), actor: UserContext = Depends(get_current_org_user)):
+    items = [item for item in get_repository().list_volunteers() if item.org_id == actor.active_org_id]
+    return VolunteersResponse(items=_sort_newest(_filter_items(items, q, ["volunteer_id", "display_name", "team_id", "home_base_label", "skills", "role_tags"])))
+
+
+@router.post("/volunteers", response_model=Volunteer)
+def create_volunteer(payload: CreateVolunteerRequest, actor: UserContext = Depends(get_current_org_user)):
+    volunteer = Volunteer(
+        volunteer_id=f"VOL-{uuid.uuid4().hex[:8].upper()}",
+        org_id=actor.active_org_id,
+        team_id=payload.team_id,
+        display_name=payload.display_name.strip(),
+        role_tags=_normalize_tags(payload.role_tags),
+        skills=_normalize_tags(payload.skills),
+        home_base_label=payload.home_base_label,
+        home_base=payload.home_base,
+        current_geo=payload.current_geo or payload.home_base,
+        availability_status=payload.availability_status,
+        max_concurrent_assignments=payload.max_concurrent_assignments,
+        reliability_score=payload.reliability_score,
+    )
+    saved = get_repository().save_volunteer(volunteer)
+    if saved.team_id:
+        teams = [item for item in get_repository().list_teams() if item.org_id == actor.active_org_id and item.team_id == saved.team_id]
+        if teams and saved.volunteer_id not in teams[0].member_ids:
+            teams[0].member_ids.append(saved.volunteer_id)
+            get_repository().save_team(teams[0])
+    return saved
 
 
 @router.delete("/volunteers/{volunteer_id}", response_model=DeleteResponse)
@@ -98,8 +148,26 @@ def delete_volunteer(volunteer_id: str, actor: UserContext = Depends(get_current
 
 
 @router.get("/resources", response_model=ResourcesResponse)
-def list_resources(actor: UserContext = Depends(get_current_org_user)):
-    return ResourcesResponse(items=[item for item in get_repository().list_resources() if item.org_id == actor.active_org_id])
+def list_resources(q: str | None = Query(default=None), actor: UserContext = Depends(get_current_org_user)):
+    items = [item for item in get_repository().list_resources() if item.org_id == actor.active_org_id]
+    return ResourcesResponse(items=_sort_newest(_filter_items(items, q, ["resource_id", "resource_type", "location_label", "current_label", "owning_team_id", "constraints"])))
+
+
+@router.post("/resources", response_model=ResourceInventory)
+def create_resource(payload: CreateResourceRequest, actor: UserContext = Depends(get_current_org_user)):
+    resource = ResourceInventory(
+        resource_id=f"RES-{uuid.uuid4().hex[:8].upper()}",
+        org_id=actor.active_org_id,
+        owning_team_id=payload.owning_team_id,
+        resource_type=payload.resource_type.strip().upper().replace(" ", "_"),
+        quantity_available=payload.quantity_available,
+        location_label=payload.location_label,
+        location=payload.location,
+        current_label=payload.current_label or payload.location_label,
+        current_geo=payload.current_geo or payload.location,
+        constraints=_normalize_tags(payload.constraints),
+    )
+    return get_repository().save_resource(resource)
 
 
 @router.delete("/resources/{resource_id}", response_model=DeleteResponse)
@@ -114,8 +182,9 @@ def delete_resource(resource_id: str, actor: UserContext = Depends(get_current_o
 
 
 @router.get("/dispatches", response_model=DispatchListResponse)
-def list_dispatches(actor: UserContext = Depends(get_current_org_user)):
-    return DispatchListResponse(items=[item for item in get_repository().list_assignments() if item.org_id == actor.active_org_id])
+def list_dispatches(q: str | None = Query(default=None), actor: UserContext = Depends(get_current_org_user)):
+    items = [item for item in get_repository().list_assignments() if item.org_id == actor.active_org_id]
+    return DispatchListResponse(items=_sort_newest(_filter_items(items, q, ["assignment_id", "case_id", "team_id", "volunteer_ids", "resource_ids"])))
 
 
 @router.delete("/dispatches/{assignment_id}", response_model=DeleteResponse)
@@ -138,8 +207,9 @@ def register_upload(
 
 
 @router.get("/ingestion-jobs", response_model=IngestionJobsResponse)
-def list_ingestion_jobs(actor: UserContext = Depends(get_current_org_user)):
-    return IngestionJobsResponse(items=[item for item in get_repository().list_ingestion_jobs() if item.org_id == actor.active_org_id])
+def list_ingestion_jobs(q: str | None = Query(default=None), actor: UserContext = Depends(get_current_org_user)):
+    items = [item for item in get_repository().list_ingestion_jobs() if item.org_id == actor.active_org_id]
+    return IngestionJobsResponse(items=_sort_newest(_filter_items(items, q, ["job_id", "filename", "target", "kind", "status"])))
 
 
 @router.get("/ingestion-jobs/{job_id}", response_model=IngestionJob)
@@ -390,14 +460,70 @@ def _geo_from_row(row: dict[str, str], prefix: str) -> GeoPoint | None:
             ]
         )
     else:
-        candidates.extend([("lat", "lng"), ("latitude", "longitude")])
+        candidates.extend(
+            [
+                ("lat", "lng"),
+                ("latitude", "longitude"),
+                ("location_lat", "location_lng"),
+                ("location_latitude", "location_longitude"),
+            ]
+        )
     for lat_key, lng_key in candidates:
         lat_raw = row.get(lat_key)
         lng_raw = row.get(lng_key)
         if not lat_raw or not lng_raw:
             continue
         try:
-            return GeoPoint(lat=float(lat_raw), lng=float(lng_raw))
+            lat = float(lat_raw)
+            lng = float(lng_raw)
         except ValueError:
             return None
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return None
+        return GeoPoint(lat=lat, lng=lng)
     return None
+
+
+def _normalize_tags(values: list[str]) -> list[str]:
+    tags: list[str] = []
+    for value in values:
+        for token in str(value).replace(";", ",").replace("|", ",").split(","):
+            normalized = token.strip().upper().replace(" ", "_")
+            if normalized and normalized not in tags:
+                tags.append(normalized)
+    return tags
+
+
+def _field_text(item: object, field: str) -> str:
+    value = getattr(item, field, "")
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return "" if value is None else str(value)
+
+
+def _filter_items[T](items: list[T], q: str | None, fields: list[str]) -> list[T]:
+    query = (q or "").strip().lower()
+    if not query:
+        return items
+    return [
+        item
+        for item in items
+        if query in " ".join(_field_text(item, field) for field in fields).lower()
+    ]
+
+
+def _sort_newest[T](items: list[T]) -> list[T]:
+    def key(item: T) -> tuple[str, str]:
+        timestamp = getattr(item, "updated_at", None) or getattr(item, "created_at", None) or getattr(item, "confirmed_at", None)
+        identifier = (
+            getattr(item, "case_id", None)
+            or getattr(item, "team_id", None)
+            or getattr(item, "volunteer_id", None)
+            or getattr(item, "resource_id", None)
+            or getattr(item, "assignment_id", None)
+            or getattr(item, "job_id", None)
+            or ""
+        )
+        return (str(timestamp or ""), str(identifier))
+
+    return sorted(items, key=key, reverse=True)

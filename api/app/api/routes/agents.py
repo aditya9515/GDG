@@ -51,7 +51,7 @@ async def run_graph1_file(
 
 @router.post("/graph1/run/{run_id}/edit", response_model=GraphRunResponse)
 def edit_graph1(run_id: str, payload: GraphEditRequest, actor: UserContext = Depends(get_current_org_user)):
-    return GraphRunResponse(run=get_agent_graph_service().edit_graph_run(run_id, payload.prompt, actor, payload.draft_id))
+    return GraphRunResponse(run=get_agent_graph_service().edit_graph_run(run_id, payload.prompt or "", actor, payload.draft_id, payload.field_updates))
 
 
 @router.post("/graph1/run/{run_id}/remove", response_model=GraphRunResponse)
@@ -76,7 +76,7 @@ def resume_graph2(run_id: str, payload: GraphResumeRequest, actor: UserContext =
 
 @router.post("/graph2/run/{run_id}/edit", response_model=GraphRunResponse)
 def edit_graph2(run_id: str, payload: GraphEditRequest, actor: UserContext = Depends(get_current_org_user)):
-    return GraphRunResponse(run=get_agent_graph_service().edit_graph_run(run_id, payload.prompt, actor, payload.draft_id))
+    return GraphRunResponse(run=get_agent_graph_service().edit_graph_run(run_id, payload.prompt or "", actor, payload.draft_id, payload.field_updates))
 
 
 @router.post("/graph2/run/{run_id}/confirm", response_model=GraphRunResponse)

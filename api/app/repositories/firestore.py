@@ -105,7 +105,7 @@ class FirestoreRepository(Repository):
         for token_id in token_ids or set():
             self._delete_query("vector_records", "token_id", token_id)
 
-    def create_case(self, raw_input: str, source_channel: str, actor: UserContext) -> CaseRecord:
+    def create_case(self, raw_input: str, source_channel: str, actor: UserContext, source_hash: str | None = None) -> CaseRecord:
         case = CaseRecord(
             case_id=f"CASE-{uuid.uuid4().hex[:8].upper()}",
             org_id=actor.active_org_id,
@@ -114,6 +114,7 @@ class FirestoreRepository(Repository):
             source_channel=source_channel,
             created_by=actor.uid,
             source_languages=["en"],
+            source_hash=source_hash,
         )
         case.incident_id = case.case_id
         self._collection("incidents").document(case.case_id).set(case.model_dump(mode="json"))
@@ -269,6 +270,11 @@ class FirestoreRepository(Repository):
     def list_volunteers(self) -> list[Volunteer]:
         return [Volunteer.model_validate(doc.to_dict()) for doc in self._collection("volunteers").stream()]
 
+    def save_volunteer(self, volunteer: Volunteer) -> Volunteer:
+        volunteer.updated_at = datetime.now(tz=UTC)
+        self._collection("volunteers").document(volunteer.volunteer_id).set(volunteer.model_dump(mode="json"))
+        return volunteer
+
     def delete_volunteer(self, volunteer_id: str, actor: UserContext) -> None:
         volunteer_doc = self._collection("volunteers").document(volunteer_id).get()
         if not volunteer_doc.exists:
@@ -297,6 +303,7 @@ class FirestoreRepository(Repository):
         return [ResourceInventory.model_validate(doc.to_dict()) for doc in self._collection("resources").stream()]
 
     def save_team(self, team: Team) -> Team:
+        team.updated_at = datetime.now(tz=UTC)
         self._collection("teams").document(team.team_id).set(team.model_dump(mode="json"))
         return team
 
@@ -323,6 +330,7 @@ class FirestoreRepository(Repository):
         self._record_delete_audit("team", team_id, team.org_id, actor)
 
     def save_resource(self, resource: ResourceInventory) -> ResourceInventory:
+        resource.updated_at = datetime.now(tz=UTC)
         self._collection("resources").document(resource.resource_id).set(resource.model_dump(mode="json"))
         return resource
 

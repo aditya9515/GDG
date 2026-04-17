@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+import hashlib
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -46,7 +48,19 @@ def create_case(
     actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
-    case = repository.create_case(payload.raw_input, payload.source_channel, actor)
+    source_hash = _source_hash("INCIDENT", payload.raw_input)
+    if not payload.force:
+        duplicate = _find_duplicate_case(repository.list_cases(), actor.active_org_id, source_hash, payload.raw_input)
+        if duplicate is not None:
+            return CreateCaseResponse(
+                case_id=duplicate.case_id,
+                incident_id=duplicate.incident_id,
+                status=duplicate.status,
+                duplicate_of=duplicate.case_id,
+                warning="Duplicate incident detected. Existing record returned instead of creating another copy.",
+                request_id=f"req-{uuid.uuid4().hex[:12]}",
+            )
+    case = repository.create_case(payload.raw_input, payload.source_channel, actor, source_hash=source_hash)
     return CreateCaseResponse(
         case_id=case.case_id,
         incident_id=case.incident_id,
@@ -59,6 +73,7 @@ def create_case(
 def list_cases(
     status: str | None = Query(default=None),
     urgency: str | None = Query(default=None),
+    q: str | None = Query(default=None),
     actor: UserContext = Depends(get_current_org_user),
 ):
     repository = get_repository()
@@ -67,6 +82,8 @@ def list_cases(
         for item in repository.list_cases(status=status, urgency=urgency)
         if item.org_id == actor.active_org_id
     ]
+    items = _filter_cases(items, q)
+    items = sorted(items, key=lambda item: (item.created_at.isoformat(), item.case_id), reverse=True)
     return CaseListResponse(items=items)
 
 
@@ -333,3 +350,45 @@ def merge_case(
 def _require_case_org(case, actor: UserContext) -> None:
     if case.org_id != actor.active_org_id:
         raise HTTPException(status_code=403, detail="Incident belongs to another organization.")
+
+
+def _normalize_source(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", value.lower())).strip()
+
+
+def _source_hash(record_type: str, raw: str) -> str:
+    normalized = f"{record_type}:{_normalize_source(raw)}"
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _find_duplicate_case(cases, org_id: str | None, source_hash: str, raw_input: str):
+    normalized = _normalize_source(raw_input)
+    for item in cases:
+        if item.org_id != org_id:
+            continue
+        if item.source_hash and item.source_hash == source_hash:
+            return item
+        if _normalize_source(item.raw_input) == normalized:
+            return item
+    return None
+
+
+def _filter_cases(items, q: str | None):
+    query = (q or "").strip().lower()
+    if not query:
+        return items
+    return [
+        item
+        for item in items
+        if query
+        in " ".join(
+            [
+                item.case_id,
+                item.raw_input,
+                item.location_text,
+                str(item.status),
+                str(item.urgency),
+                str(item.location_confidence),
+            ]
+        ).lower()
+    ]

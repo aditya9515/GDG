@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { TacticalMap } from '@/components/maps/tactical-map'
 import { useAuth } from '@/components/providers/auth-provider'
 import { UrgencyBadge } from '@/components/cases/urgency-badge'
+import { Graph2Panel } from '@/components/dispatch/graph2-panel'
 import {
   assignCase,
   deleteIncident,
@@ -30,12 +31,18 @@ export function CaseDetailScreen({ caseId }: { caseId: string }) {
     if (!user) {
       return
     }
-    void Promise.all([getCase(caseId, user), listTeams(user)]).then(([nextDetail, nextTeams]) => {
-      setDetail(nextDetail)
-      setTeams(nextTeams)
-      setLocationText(nextDetail.case.location_text)
-    })
+    void refreshDetail()
   }, [caseId, user])
+
+  async function refreshDetail() {
+    if (!user) {
+      return
+    }
+    const [nextDetail, nextTeams] = await Promise.all([getCase(caseId, user), listTeams(user)])
+    setDetail(nextDetail)
+    setTeams(nextTeams)
+    setLocationText(nextDetail.case.location_text)
+  }
 
   async function refreshRecommendations() {
     if (!user) {
@@ -251,11 +258,13 @@ export function CaseDetailScreen({ caseId }: { caseId: string }) {
             </div>
           </div>
 
+          <Graph2Panel caseId={caseId} title="Run Graph 2 dispatch plan" onCommitted={refreshDetail} />
+
           <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Dispatch options</h2>
-                <p className="mt-1 text-sm text-slate-400">Nearest capable team bundles ranked by fit and ETA.</p>
+                <h2 className="text-lg font-semibold">Fallback dispatch options</h2>
+                <p className="mt-1 text-sm text-slate-400">Direct matching remains available for debugging; Graph 2 is the primary judge-demo flow.</p>
               </div>
               <button
                 className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-white/20 hover:text-white"

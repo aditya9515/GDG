@@ -184,7 +184,8 @@ test('demo login reaches cases management and can add/remove a mapped case', asy
   await page.getByText('Use seeded demo access').click()
   await expect(page).toHaveURL(/\/command-center$/)
   await expect(page.getByRole('link', { name: 'Cases' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /Add, map, remove/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Relief allocation, mapped cleanly/i })).toBeVisible()
+  await expect(page.getByText(/Operational map/i)).toBeVisible()
   await expect(page.getByRole('link', { name: /DR-001/i }).first()).toBeVisible()
 
   await page.getByRole('link', { name: 'Cases' }).click()

@@ -90,12 +90,11 @@ export function TacticalMap({
     )
   }
 
-  if (ENABLE_GOOGLE_MAPS_UI) {
+  if (ENABLE_GOOGLE_MAPS_UI && !mapError) {
     return (
       <MapShell title={title} count={points.length}>
         <GoogleMapSurface markers={points} onError={setMapError} />
         <LegendRow />
-        {mapError ? <p className="mt-3 text-xs text-amber-100">{mapError}</p> : null}
       </MapShell>
     )
   }
@@ -104,6 +103,11 @@ export function TacticalMap({
     <MapShell title={title} count={points.length}>
       <FallbackMapSurface markers={points} />
       <LegendRow />
+      {mapError ? (
+        <p className="mt-3 text-xs text-amber-100">
+          Google Maps is unavailable, so the local tactical map is shown instead: {mapError}
+        </p>
+      ) : null}
     </MapShell>
   )
 }

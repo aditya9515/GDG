@@ -7,7 +7,6 @@ import { UrgencyBadge } from '@/components/cases/urgency-badge'
 import { StatCard } from '@/components/dashboard/stat-card'
 import { TacticalMap } from '@/components/maps/tactical-map'
 import { useAuth } from '@/components/providers/auth-provider'
-import { useCaseManager } from '@/hooks/use-case-manager'
 import {
   getDashboardSummary,
   listDispatches,
@@ -40,21 +39,16 @@ export function CommandCenterScreen() {
     jobs: [],
   })
   const [filter, setFilter] = useState<(typeof filters)[number]>('ALL')
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const { createCaseFromInput, creatingCase, removeCase, removingCaseId } = useCaseManager({
-    session: user,
-    onMessage: setMessage,
-    onRefresh: refresh,
-    onDeleted: removeCaseFromState,
-  })
 
   useEffect(() => {
     if (!user) {
       return
     }
     void refresh()
-  }, [user])
+  }, [user, search])
 
   const filteredIncidents = useMemo(() => {
     const open = state.incidents.filter((item) => !['CLOSED', 'MERGED'].includes(item.status))
@@ -138,11 +132,11 @@ export function CommandCenterScreen() {
     try {
       const [summary, incidents, teams, resources, dispatches, jobs] = await Promise.all([
         getDashboardSummary(user),
-        listIncidents(user),
-        listTeams(user),
-        listResources(user),
-        listDispatches(user),
-        listIngestionJobs(user),
+        listIncidents(user, search),
+        listTeams(user, search),
+        listResources(user, search),
+        listDispatches(user, search),
+        listIngestionJobs(user, search),
       ])
       setState({ summary, incidents, teams, resources, dispatches, jobs })
     } catch (error) {
@@ -150,29 +144,6 @@ export function CommandCenterScreen() {
     } finally {
       setLoading(false)
     }
-  }
-
-  function removeCaseFromState(caseId: string) {
-    setState((current) => ({
-      ...current,
-      incidents: current.incidents.filter((incident) => incident.case_id !== caseId),
-      dispatches: current.dispatches.filter((dispatch) => dispatch.case_id !== caseId),
-      summary: (() => {
-        const removed = current.incidents.find((incident) => incident.case_id === caseId)
-        const wasOpen = removed ? !['CLOSED', 'MERGED'].includes(removed.status) : false
-        const wasCritical = removed?.urgency === 'CRITICAL'
-        const wasMapped = Boolean(removed?.geo)
-        return current.summary
-          ? {
-              ...current.summary,
-              total_cases: Math.max(current.summary.total_cases - 1, 0),
-              open_cases: wasOpen ? Math.max(current.summary.open_cases - 1, 0) : current.summary.open_cases,
-              critical_cases: wasCritical ? Math.max(current.summary.critical_cases - 1, 0) : current.summary.critical_cases,
-              mapped_cases: wasMapped ? Math.max(current.summary.mapped_cases - 1, 0) : current.summary.mapped_cases,
-            }
-          : current.summary
-      })(),
-    }))
   }
 
   return (
@@ -192,6 +163,12 @@ export function CommandCenterScreen() {
           {message ? <p className="mt-3 text-sm text-rose-200">{message}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="border border-white/10 bg-black/45 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+            placeholder="Search map, queue, imports..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
           {filters.map((item) => (
             <button
               key={item}
@@ -223,15 +200,7 @@ export function CommandCenterScreen() {
         </div>
       </header>
 
-      <section className="grid gap-2 xl:grid-cols-[25rem_minmax(0,1fr)]">
-        <CaseRail
-          incidents={state.incidents}
-          onCreate={createCaseFromInput}
-          onRemove={removeCase}
-          creating={creatingCase}
-          removingCaseId={removingCaseId}
-        />
-
+      <section>
         <div className="motion-rise motion-delay-1">
           <TacticalMap
             title="Operational map"
@@ -429,121 +398,6 @@ export function CommandCenterScreen() {
         </div>
       </section>
     </div>
-  )
-}
-
-function CaseRail({
-  incidents,
-  onCreate,
-  onRemove,
-  creating,
-  removingCaseId,
-}: {
-  incidents: CaseRecord[]
-  onCreate: (payload: { rawInput: string; locationText: string; lat: string; lng: string }) => Promise<boolean>
-  onRemove: (caseId: string) => Promise<boolean>
-  creating: boolean
-  removingCaseId: string | null
-}) {
-  const [rawInput, setRawInput] = useState('')
-  const [locationText, setLocationText] = useState('')
-  const [lat, setLat] = useState('')
-  const [lng, setLng] = useState('')
-
-  async function submit() {
-    const created = await onCreate({ rawInput, locationText, lat, lng })
-    if (created) {
-      setRawInput('')
-      setLocationText('')
-      setLat('')
-      setLng('')
-    }
-  }
-
-  return (
-    <aside className="surface-card motion-rise motion-delay-1 max-h-[48rem] overflow-hidden p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Cases</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">Add, map, remove</h2>
-        </div>
-        <span className="border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-          {incidents.length}
-        </span>
-      </div>
-
-      <div className="mt-4 border border-white/[0.08] bg-white/[0.025] p-3">
-        <textarea
-          className="min-h-24 w-full resize-none border border-white/10 bg-black/40 px-3 py-2 text-sm leading-5 text-white outline-none placeholder:text-slate-600 focus:border-white/25"
-          placeholder="Paste a field report. Example: Flood water rising near Shantinagar bridge, 4 people trapped, rescue boat needed."
-          value={rawInput}
-          onChange={(event) => setRawInput(event.target.value)}
-        />
-        <input
-          className="mt-2 w-full border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-white/25"
-          placeholder="Location label or address"
-          value={locationText}
-          onChange={(event) => setLocationText(event.target.value)}
-        />
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <input
-            className="border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-white/25"
-            placeholder="Latitude"
-            value={lat}
-            onChange={(event) => setLat(event.target.value)}
-          />
-          <input
-            className="border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-white/25"
-            placeholder="Longitude"
-            value={lng}
-            onChange={(event) => setLng(event.target.value)}
-          />
-        </div>
-        <button
-          className="mt-3 w-full border border-white/15 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={creating || rawInput.trim().length < 3}
-          onClick={() => void submit()}
-        >
-          {creating ? 'Creating case...' : 'Create case'}
-        </button>
-        <p className="mt-2 text-[11px] leading-5 text-slate-500">
-          Coordinates are optional, but adding them makes the case appear on the map immediately.
-        </p>
-      </div>
-
-      <div className="mt-4 grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
-        {incidents.map((incident) => (
-          <div key={incident.case_id} className="border border-white/[0.08] bg-white/[0.025] p-3 transition hover:border-white/15 hover:bg-white/[0.045]">
-            <div className="flex items-start justify-between gap-3">
-              <Link href={`/incidents/${incident.case_id}`} className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <UrgencyBadge urgency={incident.urgency} />
-                  <span className="border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-500">
-                    {incident.location_confidence}
-                  </span>
-                </div>
-                <p className="mt-2 truncate text-sm font-semibold text-white">{incident.case_id}</p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{incident.raw_input}</p>
-                <p className="mt-2 truncate text-[11px] text-slate-600">{incident.location_text || 'No location yet'}</p>
-              </Link>
-              <button
-                aria-label={`Remove ${incident.case_id}`}
-                className="shrink-0 border border-white/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-white hover:text-black"
-                disabled={removingCaseId === incident.case_id}
-                onClick={() => void onRemove(incident.case_id)}
-              >
-                {removingCaseId === incident.case_id ? 'Removing' : 'Remove'}
-              </button>
-            </div>
-          </div>
-        ))}
-        {incidents.length === 0 ? (
-          <div className="border border-dashed border-white/10 p-4 text-sm text-slate-500">
-            No cases match the current filter.
-          </div>
-        ) : null}
-      </div>
-    </aside>
   )
 }
 

@@ -40,6 +40,46 @@ export interface SessionState {
   mode: 'demo' | 'firebase'
 }
 
+type CreateIncidentResponse = {
+  case_id: string
+  incident_id?: string | null
+  status?: string
+  duplicate_of?: string | null
+  warning?: string | null
+  request_id?: string
+}
+
+type GeoPayload = { lat: number; lng: number } | null
+
+const listCache = new Map<string, unknown>()
+
+function scopedKey(session: SessionState | null, path: string) {
+  return `${session?.active_org_id ?? session?.uid ?? 'anon'}:${path}`
+}
+
+export function invalidateListCache(prefix?: string) {
+  if (!prefix) {
+    listCache.clear()
+    return
+  }
+  for (const key of listCache.keys()) {
+    if (key.includes(prefix)) {
+      listCache.delete(key)
+    }
+  }
+}
+
+function withQuery(path: string, params: Record<string, string | undefined | null>) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value?.trim()) {
+      query.set(key, value.trim())
+    }
+  })
+  const serialized = query.toString()
+  return serialized ? `${path}?${serialized}` : path
+}
+
 function buildHeaders(session: SessionState | null): HeadersInit {
   if (!session) {
     return {}
@@ -204,11 +244,13 @@ export async function removeOrgMember(orgId: string, membershipId: string, sessi
 }
 
 export async function resetOrganizationData(orgId: string, session: SessionState | null) {
-  return request<ResetOrganizationDataResponse>(
+  const response = await request<ResetOrganizationDataResponse>(
     `/organizations/${orgId}/reset-data`,
     { method: 'POST', body: JSON.stringify({ confirmation: 'RESET_ORG_DATA' }) },
     session,
   )
+  invalidateListCache()
+  return response
 }
 
 export async function runGraph1(
@@ -239,16 +281,24 @@ export async function runGraph1File(
   return request<{ run: GraphRun }>('/agent/graph1/run-file', { method: 'POST', body: form }, session)
 }
 
-export async function editGraph1(runId: string, prompt: string, draftId: string | null, session: SessionState | null) {
+export async function editGraph1(
+  runId: string,
+  prompt: string,
+  draftId: string | null,
+  session: SessionState | null,
+  fieldUpdates: Record<string, unknown> = {},
+) {
   return request<{ run: GraphRun }>(
     `/agent/graph1/run/${runId}/edit`,
-    { method: 'POST', body: JSON.stringify({ prompt, draft_id: draftId }) },
+    { method: 'POST', body: JSON.stringify({ prompt: prompt || undefined, draft_id: draftId, field_updates: fieldUpdates }) },
     session,
   )
 }
 
 export async function confirmGraph1(runId: string, session: SessionState | null) {
-  return request<{ run: GraphRun }>(`/agent/graph1/run/${runId}/confirm`, { method: 'POST' }, session)
+  const response = await request<{ run: GraphRun }>(`/agent/graph1/run/${runId}/confirm`, { method: 'POST' }, session)
+  invalidateListCache()
+  return response
 }
 
 export async function removeGraph1Draft(runId: string, draftId: string, reason: string, session: SessionState | null) {
@@ -267,8 +317,31 @@ export async function runGraph2(payload: { linked_case_id: string; text?: string
   )
 }
 
+export async function resumeGraph2(runId: string, answers: Record<string, string>, session: SessionState | null) {
+  return request<{ run: GraphRun }>(
+    `/agent/graph2/run/${runId}/resume`,
+    { method: 'POST', body: JSON.stringify({ answers }) },
+    session,
+  )
+}
+
+export async function confirmGraph2(runId: string, session: SessionState | null) {
+  const response = await request<{ run: GraphRun }>(`/agent/graph2/run/${runId}/confirm`, { method: 'POST' }, session)
+  invalidateListCache()
+  return response
+}
+
 export async function getDashboardSummary(session: SessionState | null): Promise<DashboardSummary> {
-  return request<DashboardSummary>('/dashboard/summary', {}, session)
+  const path = '/dashboard/summary'
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as DashboardSummary | undefined
+  if (cached) {
+    void request<DashboardSummary>(path, {}, session).then((payload) => listCache.set(key, payload)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<DashboardSummary>(path, {}, session)
+  listCache.set(key, payload)
+  return payload
 }
 
 export async function getAiStatus(session: SessionState | null): Promise<AiStatusResponse> {
@@ -295,13 +368,21 @@ export async function downloadGraphRunCsv(runId: string, session: SessionState |
   URL.revokeObjectURL(url)
 }
 
-export async function listIncidents(session: SessionState | null): Promise<CaseRecord[]> {
-  const payload = await request<{ items: CaseRecord[] }>('/incidents', {}, session)
+export async function listIncidents(session: SessionState | null, q?: string): Promise<CaseRecord[]> {
+  const path = withQuery('/incidents', { q })
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as CaseRecord[] | undefined
+  if (cached) {
+    void request<{ items: CaseRecord[] }>(path, {}, session).then((payload) => listCache.set(key, payload.items)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<{ items: CaseRecord[] }>(path, {}, session)
+  listCache.set(key, payload.items)
   return payload.items
 }
 
-export async function listCases(session: SessionState | null): Promise<CaseRecord[]> {
-  return listIncidents(session)
+export async function listCases(session: SessionState | null, q?: string): Promise<CaseRecord[]> {
+  return listIncidents(session, q)
 }
 
 export async function getIncident(caseId: string, session: SessionState | null): Promise<CaseDetailResponse> {
@@ -309,26 +390,32 @@ export async function getIncident(caseId: string, session: SessionState | null):
 }
 
 export async function deleteIncident(caseId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/incidents/${caseId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/incidents')
+  invalidateListCache('/dashboard')
+  return response
 }
 
 export async function getCase(caseId: string, session: SessionState | null): Promise<CaseDetailResponse> {
   return getIncident(caseId, session)
 }
 
-export async function createIncident(rawInput: string, session: SessionState | null): Promise<{ case_id: string; incident_id?: string | null }> {
-  return request<{ case_id: string; incident_id?: string | null }>(
+export async function createIncident(rawInput: string, session: SessionState | null, force = false): Promise<CreateIncidentResponse> {
+  const response = await request<CreateIncidentResponse>(
     '/incidents',
     {
       method: 'POST',
-      body: JSON.stringify({ raw_input: rawInput, source_channel: 'MANUAL' }),
+      body: JSON.stringify({ raw_input: rawInput, source_channel: 'MANUAL', force }),
     },
     session,
   )
+  invalidateListCache('/incidents')
+  invalidateListCache('/dashboard')
+  return response
 }
 
 export async function createCase(rawInput: string, session: SessionState | null) {
@@ -410,56 +497,166 @@ export async function assignCase(
   )
 }
 
-export async function listTeams(session: SessionState | null): Promise<Team[]> {
-  const payload = await request<{ items: Team[] }>('/teams', {}, session)
+export async function listTeams(session: SessionState | null, q?: string): Promise<Team[]> {
+  const path = withQuery('/teams', { q })
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as Team[] | undefined
+  if (cached) {
+    void request<{ items: Team[] }>(path, {}, session).then((payload) => listCache.set(key, payload.items)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<{ items: Team[] }>(path, {}, session)
+  listCache.set(key, payload.items)
   return payload.items
 }
 
+export async function createTeam(
+  payload: {
+    display_name: string
+    capability_tags: string[]
+    member_ids?: string[]
+    service_radius_km: number
+    base_label: string
+    base_geo?: GeoPayload
+    current_label?: string | null
+    current_geo?: GeoPayload
+    availability_status?: string
+    reliability_score?: number
+  },
+  session: SessionState | null,
+) {
+  const response = await request<Team>('/teams', { method: 'POST', body: JSON.stringify(payload) }, session)
+  invalidateListCache('/teams')
+  invalidateListCache('/dashboard')
+  return response
+}
+
 export async function deleteTeam(teamId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/teams/${teamId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/teams')
+  invalidateListCache('/dashboard')
+  return response
 }
 
-export async function listVolunteers(session: SessionState | null): Promise<Volunteer[]> {
-  const payload = await request<{ items: Volunteer[] }>('/volunteers', {}, session)
+export async function listVolunteers(session: SessionState | null, q?: string): Promise<Volunteer[]> {
+  const path = withQuery('/volunteers', { q })
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as Volunteer[] | undefined
+  if (cached) {
+    void request<{ items: Volunteer[] }>(path, {}, session).then((payload) => listCache.set(key, payload.items)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<{ items: Volunteer[] }>(path, {}, session)
+  listCache.set(key, payload.items)
   return payload.items
 }
 
+export async function createVolunteer(
+  payload: {
+    display_name: string
+    team_id?: string | null
+    role_tags: string[]
+    skills: string[]
+    home_base_label: string
+    home_base?: GeoPayload
+    current_geo?: GeoPayload
+    availability_status?: string
+    max_concurrent_assignments?: number
+    reliability_score?: number
+  },
+  session: SessionState | null,
+) {
+  const response = await request<Volunteer>('/volunteers', { method: 'POST', body: JSON.stringify(payload) }, session)
+  invalidateListCache('/volunteers')
+  invalidateListCache('/teams')
+  invalidateListCache('/dashboard')
+  return response
+}
+
 export async function deleteVolunteer(volunteerId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/volunteers/${volunteerId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/volunteers')
+  invalidateListCache('/teams')
+  invalidateListCache('/dashboard')
+  return response
 }
 
-export async function listResources(session: SessionState | null): Promise<ResourceInventory[]> {
-  const payload = await request<{ items: ResourceInventory[] }>('/resources', {}, session)
+export async function listResources(session: SessionState | null, q?: string): Promise<ResourceInventory[]> {
+  const path = withQuery('/resources', { q })
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as ResourceInventory[] | undefined
+  if (cached) {
+    void request<{ items: ResourceInventory[] }>(path, {}, session).then((payload) => listCache.set(key, payload.items)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<{ items: ResourceInventory[] }>(path, {}, session)
+  listCache.set(key, payload.items)
   return payload.items
 }
 
+export async function createResource(
+  payload: {
+    owning_team_id?: string | null
+    resource_type: string
+    quantity_available: number
+    location_label: string
+    location?: GeoPayload
+    current_label?: string | null
+    current_geo?: GeoPayload
+    constraints: string[]
+  },
+  session: SessionState | null,
+) {
+  const response = await request<ResourceInventory>('/resources', { method: 'POST', body: JSON.stringify(payload) }, session)
+  invalidateListCache('/resources')
+  invalidateListCache('/dashboard')
+  return response
+}
+
 export async function deleteResource(resourceId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/resources/${resourceId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/resources')
+  invalidateListCache('/dashboard')
+  return response
 }
 
-export async function listDispatches(session: SessionState | null): Promise<AssignmentDecision[]> {
-  const payload = await request<{ items: AssignmentDecision[] }>('/dispatches', {}, session)
+export async function listDispatches(session: SessionState | null, q?: string): Promise<AssignmentDecision[]> {
+  const path = withQuery('/dispatches', { q })
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as AssignmentDecision[] | undefined
+  if (cached) {
+    void request<{ items: AssignmentDecision[] }>(path, {}, session).then((payload) => listCache.set(key, payload.items)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<{ items: AssignmentDecision[] }>(path, {}, session)
+  listCache.set(key, payload.items)
   return payload.items
 }
 
 export async function deleteDispatch(assignmentId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/dispatches/${assignmentId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/dispatches')
+  invalidateListCache('/incidents')
+  invalidateListCache('/teams')
+  invalidateListCache('/resources')
+  invalidateListCache('/dashboard')
+  return response
 }
 
 export async function registerUpload(
@@ -530,25 +727,37 @@ export async function createIngestionJob(
   return job
 }
 
-export async function listIngestionJobs(session: SessionState | null): Promise<IngestionJob[]> {
-  const payload = await request<{ items: IngestionJob[] }>('/ingestion-jobs', {}, session)
+export async function listIngestionJobs(session: SessionState | null, q?: string): Promise<IngestionJob[]> {
+  const path = withQuery('/ingestion-jobs', { q })
+  const key = scopedKey(session, path)
+  const cached = listCache.get(key) as IngestionJob[] | undefined
+  if (cached) {
+    void request<{ items: IngestionJob[] }>(path, {}, session).then((payload) => listCache.set(key, payload.items)).catch(() => undefined)
+    return cached
+  }
+  const payload = await request<{ items: IngestionJob[] }>(path, {}, session)
+  listCache.set(key, payload.items)
   return payload.items
 }
 
 export async function deleteIngestionJob(jobId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/ingestion-jobs/${jobId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/ingestion-jobs')
+  return response
 }
 
 export async function deleteGraphRun(runId: string, session: SessionState | null) {
-  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+  const response = await request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
     `/agent/runs/${runId}`,
     { method: 'DELETE' },
     session,
   )
+  invalidateListCache('/ingestion-jobs')
+  return response
 }
 
 export async function getLatestEval(session: SessionState | null): Promise<EvalRunSummary | null> {

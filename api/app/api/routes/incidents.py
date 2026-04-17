@@ -45,12 +45,31 @@ def list_incidents(
     status: str | None = Query(default=None),
     urgency: str | None = Query(default=None),
     location_confidence: str | None = Query(default=None),
+    q: str | None = Query(default=None),
     actor: UserContext = Depends(get_current_org_user),
 ):
     items = get_repository().list_cases(status=status, urgency=urgency)
     items = [item for item in items if item.org_id == actor.active_org_id]
     if location_confidence:
         items = [item for item in items if item.location_confidence == location_confidence]
+    query = (q or "").strip().lower()
+    if query:
+        items = [
+            item
+            for item in items
+            if query
+            in " ".join(
+                [
+                    item.case_id,
+                    item.raw_input,
+                    item.location_text,
+                    str(item.status),
+                    str(item.urgency),
+                    str(item.location_confidence),
+                ]
+            ).lower()
+        ]
+    items = sorted(items, key=lambda item: (item.created_at.isoformat(), item.case_id), reverse=True)
     return CaseListResponse(items=items)
 
 

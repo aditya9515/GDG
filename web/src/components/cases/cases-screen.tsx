@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 
+import { Graph2Panel } from '@/components/dispatch/graph2-panel'
 import { TacticalMap } from '@/components/maps/tactical-map'
 import { useAuth } from '@/components/providers/auth-provider'
 import { useCaseManager } from '@/hooks/use-case-manager'
@@ -19,6 +20,8 @@ export function CasesScreen() {
   const { user } = useAuth()
   const [incidents, setIncidents] = useState<CaseRecord[]>([])
   const [filter, setFilter] = useState<CaseFilter>('ALL')
+  const [search, setSearch] = useState('')
+  const [planningCaseId, setPlanningCaseId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [rawInput, setRawInput] = useState('')
@@ -38,7 +41,7 @@ export function CasesScreen() {
       return
     }
     void refresh()
-  }, [user])
+  }, [user, search])
 
   const filteredIncidents = useMemo(() => {
     if (filter === 'ALL') {
@@ -72,7 +75,7 @@ export function CasesScreen() {
     setLoading(true)
     setMessage(null)
     try {
-      setIncidents(await listIncidents(user))
+      setIncidents(await listIncidents(user, search))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not load cases.')
     } finally {
@@ -176,7 +179,13 @@ export function CasesScreen() {
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">All cases</p>
             <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">{filteredIncidents.length} visible</h2>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input
+              className="min-w-64 border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+              placeholder="Search cases..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
             {filters.map((item) => (
               <button
                 key={item}
@@ -225,6 +234,12 @@ export function CasesScreen() {
                     Open
                   </Link>
                   <button
+                    className="border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-white hover:text-black"
+                    onClick={() => setPlanningCaseId((current) => (current === incident.case_id ? null : incident.case_id))}
+                  >
+                    Plan
+                  </button>
+                  <button
                     aria-label={`Remove ${incident.case_id}`}
                     className="border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-white hover:text-black disabled:opacity-50"
                     disabled={removingCaseId === incident.case_id}
@@ -243,6 +258,14 @@ export function CasesScreen() {
           ) : null}
         </div>
       </section>
+
+      {planningCaseId ? (
+        <Graph2Panel
+          caseId={planningCaseId}
+          title={`Dispatch plan for ${planningCaseId}`}
+          onCommitted={refresh}
+        />
+      ) : null}
     </div>
   )
 }

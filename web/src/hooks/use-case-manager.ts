@@ -85,7 +85,10 @@ export function useCaseManager({ session, onMessage, onRefresh, onDeleted }: Use
           )
         }
       } else {
-        onMessage(`${created.case_id} created. Add a location when you are ready to map it.`)
+        onMessage(created.warning ?? `${created.case_id} created. Add a location when you are ready to map it.`)
+      }
+      if (created.warning && shouldAttachLocation) {
+        onMessage(created.warning)
       }
       await onRefresh()
       return true
