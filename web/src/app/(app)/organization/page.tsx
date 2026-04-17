@@ -3,7 +3,14 @@
 import { useEffect, useState } from 'react'
 
 import { useAuth } from '@/components/providers/auth-provider'
-import { createOrganization, getOrganizationMembers, inviteOrgMember, removeOrgMember, updateOrgMember } from '@/lib/api'
+import {
+  createOrganization,
+  getOrganizationMembers,
+  inviteOrgMember,
+  removeOrgMember,
+  resetOrganizationData,
+  updateOrgMember,
+} from '@/lib/api'
 import type { OrgInvite, OrgMembership, OrgRole, Organization } from '@/lib/types'
 
 const roles: OrgRole[] = ['INCIDENT_COORDINATOR', 'MEDICAL_COORDINATOR', 'LOGISTICS_LEAD', 'VIEWER']
@@ -18,6 +25,9 @@ export default function OrganizationPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [newOrgName, setNewOrgName] = useState('')
+  const [resetConfirm, setResetConfirm] = useState('')
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetSummary, setResetSummary] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user?.active_org_id || !user.is_host) {
@@ -91,6 +101,34 @@ export default function OrganizationPage() {
     }
     await removeOrgMember(user.active_org_id, member.membership_id, user)
     await refresh()
+  }
+
+  async function resetActiveOrganizationData() {
+    if (!user?.active_org_id || resetConfirm !== 'RESET_ORG_DATA') {
+      return
+    }
+    if (!window.confirm('Reset all operational data for this organization? Members and invites will stay.')) {
+      return
+    }
+    setResetBusy(true)
+    setMessage(null)
+    setResetSummary(null)
+    try {
+      const response = await resetOrganizationData(user.active_org_id, user)
+      await refreshSession()
+      await refresh()
+      const deleted = Object.entries(response.deleted_counts)
+        .filter(([, count]) => count > 0)
+        .map(([key, count]) => `${key}: ${count}`)
+        .join(', ')
+      setResetSummary(deleted || 'No operational records were present.')
+      setResetConfirm('')
+      setMessage('Organization data reset complete.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Reset failed.')
+    } finally {
+      setResetBusy(false)
+    }
   }
 
   if (!user?.is_host) {
@@ -208,6 +246,31 @@ export default function OrganizationPage() {
           </div>
         </section>
       ) : null}
+
+      <section id="danger-zone" className="border border-white/12 bg-black p-5">
+        <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Danger zone</p>
+        <h2 className="mt-2 text-xl font-semibold text-white">Reset organization data</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+          This removes incidents, teams, resources, dispatches, imports, graph runs, tokens, vectors, and evidence for the active
+          organization. It keeps the organization, host account, members, and invites.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+          <input
+            className="border border-white/10 bg-black px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+            placeholder="Type RESET_ORG_DATA"
+            value={resetConfirm}
+            onChange={(event) => setResetConfirm(event.target.value)}
+          />
+          <button
+            className="border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={resetBusy || resetConfirm !== 'RESET_ORG_DATA'}
+            onClick={() => void resetActiveOrganizationData()}
+          >
+            {resetBusy ? 'Resetting...' : 'Reset data'}
+          </button>
+        </div>
+        {resetSummary ? <p className="mt-3 text-sm text-slate-300">Deleted {resetSummary}</p> : null}
+      </section>
     </div>
   )
 }

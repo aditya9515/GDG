@@ -12,6 +12,7 @@ from app.services.docling_parser import DoclingParserService
 from app.services.extractor import ExtractionService
 from app.services.geocoding import GeocodingService
 from app.services.matching import MatchingService
+from app.services.ollama import OllamaClient
 from app.services.routing import RoutingService
 from app.services.scoring import ScoringService
 from app.services.storage_bridge import StorageBridgeService
@@ -29,7 +30,12 @@ def get_repository() -> Repository:
 
 @lru_cache(maxsize=1)
 def get_extraction_service() -> ExtractionService:
-    return ExtractionService(settings=get_settings())
+    return ExtractionService(settings=get_settings(), ollama_client=get_ollama_client())
+
+
+@lru_cache(maxsize=1)
+def get_ollama_client() -> OllamaClient:
+    return OllamaClient(settings=get_settings())
 
 
 @lru_cache(maxsize=1)

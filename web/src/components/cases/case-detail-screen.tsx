@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 import { TacticalMap } from '@/components/maps/tactical-map'
 import { useAuth } from '@/components/providers/auth-provider'
 import { UrgencyBadge } from '@/components/cases/urgency-badge'
 import {
   assignCase,
+  deleteIncident,
   getCase,
   listTeams,
   recommendCase,
@@ -16,11 +18,13 @@ import type { CaseDetailResponse, Recommendation, Team } from '@/lib/types'
 
 export function CaseDetailScreen({ caseId }: { caseId: string }) {
   const { user } = useAuth()
+  const router = useRouter()
   const [detail, setDetail] = useState<CaseDetailResponse | null>(null)
   const [teams, setTeams] = useState<Team[]>([])
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [locationText, setLocationText] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!user) {
@@ -77,6 +81,27 @@ export function CaseDetailScreen({ caseId }: { caseId: string }) {
     setMessage('Location marked as confirmed for dispatch.')
   }
 
+  async function removeIncident() {
+    if (!user || deleting) {
+      return
+    }
+    const ok = window.confirm(
+      `Remove ${caseId}? This deletes the incident plus its tokens, evidence metadata, duplicate links, recommendations, and dispatch records.`,
+    )
+    if (!ok) {
+      return
+    }
+    setDeleting(true)
+    try {
+      await deleteIncident(caseId, user)
+      router.push('/command-center')
+      router.refresh()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Incident removal failed.')
+      setDeleting(false)
+    }
+  }
+
   if (!detail) {
     return <div className="text-sm text-slate-400">Loading incident detail...</div>
   }
@@ -129,6 +154,13 @@ export function CaseDetailScreen({ caseId }: { caseId: string }) {
               {incident.duplicate_status}
             </span>
           ) : null}
+          <button
+            className="rounded-full border border-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={deleting}
+            onClick={() => void removeIncident()}
+          >
+            {deleting ? 'Removing' : 'Remove'}
+          </button>
         </div>
       </header>
 

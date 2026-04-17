@@ -21,8 +21,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (isLoading || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(249,115,22,0.16),_transparent_40%),linear-gradient(180deg,#0d141c,#111827)] text-sm text-slate-300">
-        Preparing the operations console...
+      <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
+        <div className="motion-rise rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
+          Preparing the operations console...
+        </div>
       </div>
     )
   }

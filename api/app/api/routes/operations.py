@@ -20,6 +20,7 @@ from app.core.security import get_current_org_user, get_current_user
 from app.models.domain import (
     AuthSessionResponse,
     CaseEvent,
+    DeleteResponse,
     DispatchListResponse,
     EvidenceStatus,
     GeoPoint,
@@ -66,22 +67,66 @@ def get_session_profile(actor: UserContext = Depends(get_current_user)):
 
 @router.get("/teams", response_model=TeamsResponse)
 def list_teams(actor: UserContext = Depends(get_current_org_user)):
-    return TeamsResponse(items=[item for item in get_repository().list_teams() if item.org_id in {None, actor.active_org_id}])
+    return TeamsResponse(items=[item for item in get_repository().list_teams() if item.org_id == actor.active_org_id])
+
+
+@router.delete("/teams/{team_id}", response_model=DeleteResponse)
+def delete_team(team_id: str, actor: UserContext = Depends(get_current_org_user)):
+    try:
+        get_repository().delete_team(team_id, actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Team not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return DeleteResponse(deleted_id=team_id, deleted_type="team", request_id=f"req-{uuid.uuid4().hex[:12]}")
 
 
 @router.get("/volunteers", response_model=VolunteersResponse)
 def list_volunteers(actor: UserContext = Depends(get_current_org_user)):
-    return VolunteersResponse(items=[item for item in get_repository().list_volunteers() if item.org_id in {None, actor.active_org_id}])
+    return VolunteersResponse(items=[item for item in get_repository().list_volunteers() if item.org_id == actor.active_org_id])
+
+
+@router.delete("/volunteers/{volunteer_id}", response_model=DeleteResponse)
+def delete_volunteer(volunteer_id: str, actor: UserContext = Depends(get_current_org_user)):
+    try:
+        get_repository().delete_volunteer(volunteer_id, actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Volunteer not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return DeleteResponse(deleted_id=volunteer_id, deleted_type="volunteer", request_id=f"req-{uuid.uuid4().hex[:12]}")
 
 
 @router.get("/resources", response_model=ResourcesResponse)
 def list_resources(actor: UserContext = Depends(get_current_org_user)):
-    return ResourcesResponse(items=[item for item in get_repository().list_resources() if item.org_id in {None, actor.active_org_id}])
+    return ResourcesResponse(items=[item for item in get_repository().list_resources() if item.org_id == actor.active_org_id])
+
+
+@router.delete("/resources/{resource_id}", response_model=DeleteResponse)
+def delete_resource(resource_id: str, actor: UserContext = Depends(get_current_org_user)):
+    try:
+        get_repository().delete_resource(resource_id, actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Resource not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return DeleteResponse(deleted_id=resource_id, deleted_type="resource", request_id=f"req-{uuid.uuid4().hex[:12]}")
 
 
 @router.get("/dispatches", response_model=DispatchListResponse)
 def list_dispatches(actor: UserContext = Depends(get_current_org_user)):
-    return DispatchListResponse(items=[item for item in get_repository().list_assignments() if item.org_id in {None, actor.active_org_id}])
+    return DispatchListResponse(items=[item for item in get_repository().list_assignments() if item.org_id == actor.active_org_id])
+
+
+@router.delete("/dispatches/{assignment_id}", response_model=DeleteResponse)
+def delete_dispatch(assignment_id: str, actor: UserContext = Depends(get_current_org_user)):
+    try:
+        get_repository().delete_assignment(assignment_id, actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Dispatch not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return DeleteResponse(deleted_id=assignment_id, deleted_type="dispatch", request_id=f"req-{uuid.uuid4().hex[:12]}")
 
 
 @router.post("/uploads/register", response_model=UploadRegistrationResponse)
@@ -94,15 +139,26 @@ def register_upload(
 
 @router.get("/ingestion-jobs", response_model=IngestionJobsResponse)
 def list_ingestion_jobs(actor: UserContext = Depends(get_current_org_user)):
-    return IngestionJobsResponse(items=[item for item in get_repository().list_ingestion_jobs() if item.org_id in {None, actor.active_org_id}])
+    return IngestionJobsResponse(items=[item for item in get_repository().list_ingestion_jobs() if item.org_id == actor.active_org_id])
 
 
 @router.get("/ingestion-jobs/{job_id}", response_model=IngestionJob)
 def get_ingestion_job(job_id: str, actor: UserContext = Depends(get_current_org_user)):
     job = get_repository().get_ingestion_job(job_id)
-    if job.org_id not in {None, actor.active_org_id}:
+    if job.org_id != actor.active_org_id:
         raise HTTPException(status_code=403, detail="Ingestion job belongs to another organization.")
     return job
+
+
+@router.delete("/ingestion-jobs/{job_id}", response_model=DeleteResponse)
+def delete_ingestion_job(job_id: str, actor: UserContext = Depends(get_current_org_user)):
+    try:
+        get_repository().delete_ingestion_job(job_id, actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return DeleteResponse(deleted_id=job_id, deleted_type="ingestion_job", request_id=f"req-{uuid.uuid4().hex[:12]}")
 
 
 @router.post("/ingestion-jobs", response_model=IngestionJob)

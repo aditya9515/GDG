@@ -4,7 +4,8 @@ import uuid
 from datetime import UTC, datetime
 import math
 
-from google.cloud import firestore
+from google.api_core.exceptions import GoogleAPIError, NotFound
+from google.cloud import firestore, storage
 
 from app.core.config import Settings
 from app.models.domain import (
@@ -48,9 +49,61 @@ class FirestoreRepository(Repository):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = firestore.Client(project=settings.firebase_project_id, database=settings.firestore_database)
+        self._storage_client: storage.Client | None = None
 
     def _collection(self, name: str):
         return self.client.collection(name)
+
+    def _get_storage_client(self) -> storage.Client:
+        if self._storage_client is None:
+            self._storage_client = storage.Client(project=self.settings.firebase_project_id)
+        return self._storage_client
+
+    def _delete_storage_path(self, storage_path: str | None) -> None:
+        if not storage_path or not storage_path.startswith("gs://"):
+            return
+        bucket_and_path = storage_path.removeprefix("gs://")
+        bucket_name, _, object_path = bucket_and_path.partition("/")
+        if not bucket_name or not object_path:
+            return
+        try:
+            self._get_storage_client().bucket(bucket_name).blob(object_path).delete()
+        except (GoogleAPIError, NotFound):
+            return
+
+    def _require_org_scope(self, org_id: str | None, actor: UserContext) -> None:
+        if org_id != actor.active_org_id:
+            raise PermissionError("Record belongs to another organization.")
+
+    def _record_delete_audit(self, deleted_type: str, deleted_id: str, org_id: str | None, actor: UserContext) -> None:
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action=f"{deleted_type.upper()}_DELETED",
+                object_ref=deleted_id,
+                payload={"deleted_type": deleted_type},
+            )
+        )
+
+    def _delete_docs(self, docs) -> list[str]:
+        deleted_ids: list[str] = []
+        for doc in docs:
+            deleted_ids.append(doc.id)
+            doc.reference.delete()
+        return deleted_ids
+
+    def _delete_query(self, collection_name: str, field_path: str, value: str) -> list[str]:
+        return self._delete_docs(self._collection(collection_name).where(field_path, "==", value).stream())
+
+    def _delete_array_contains(self, collection_name: str, field_path: str, value: str) -> list[str]:
+        return self._delete_docs(self._collection(collection_name).where(field_path, "array_contains", value).stream())
+
+    def _delete_vectors_for(self, record_id: str, token_ids: set[str] | None = None) -> None:
+        self._delete_query("vector_records", "record_id", record_id)
+        for token_id in token_ids or set():
+            self._delete_query("vector_records", "token_id", token_id)
 
     def create_case(self, raw_input: str, source_channel: str, actor: UserContext) -> CaseRecord:
         case = CaseRecord(
@@ -118,6 +171,40 @@ class FirestoreRepository(Repository):
             dispatches=dispatches,
         )
 
+    def delete_case(self, case_id: str, actor: UserContext) -> None:
+        case_doc = self._collection("incidents").document(case_id).get()
+        if not case_doc.exists:
+            raise KeyError(case_id)
+        case = CaseRecord.model_validate(case_doc.to_dict())
+        self._require_org_scope(case.org_id, actor)
+        dispatches = [
+            AssignmentDecision.model_validate(doc.to_dict())
+            for doc in self._collection("dispatches").where("case_id", "==", case_id).stream()
+        ]
+        for dispatch in dispatches:
+            self.delete_assignment(dispatch.assignment_id, actor)
+
+        token_ids = set(self._delete_query("info_tokens", "case_id", case_id))
+        token_ids.update(self._delete_query("info_tokens", "linked_entity_id", case_id))
+        self._delete_query("incident_events", "case_id", case_id)
+        self._delete_query("duplicate_links", "case_id", case_id)
+        self._delete_query("duplicate_links", "other_case_id", case_id)
+        evidence_docs = [
+            *list(self._collection("evidence_items").where("linked_entity_id", "==", case_id).stream()),
+            *list(self._collection("evidence_items").where("incident_id", "==", case_id).stream()),
+        ]
+        seen_evidence_ids: set[str] = set()
+        for evidence_doc in evidence_docs:
+            if evidence_doc.id in seen_evidence_ids:
+                continue
+            seen_evidence_ids.add(evidence_doc.id)
+            evidence = EvidenceItem.model_validate(evidence_doc.to_dict())
+            self._delete_storage_path(evidence.storage_path)
+            evidence_doc.reference.delete()
+        self._delete_vectors_for(case_id, token_ids)
+        self._collection("incidents").document(case_id).delete()
+        self._record_delete_audit("incident", case_id, case.org_id, actor)
+
     def save_extraction(self, case_id: str, extraction: IncidentExtraction, status: str) -> CaseRecord:
         self._collection("incidents").document(case_id).update(
             {
@@ -182,6 +269,27 @@ class FirestoreRepository(Repository):
     def list_volunteers(self) -> list[Volunteer]:
         return [Volunteer.model_validate(doc.to_dict()) for doc in self._collection("volunteers").stream()]
 
+    def delete_volunteer(self, volunteer_id: str, actor: UserContext) -> None:
+        volunteer_doc = self._collection("volunteers").document(volunteer_id).get()
+        if not volunteer_doc.exists:
+            raise KeyError(volunteer_id)
+        volunteer = Volunteer.model_validate(volunteer_doc.to_dict())
+        self._require_org_scope(volunteer.org_id, actor)
+        for team_doc in self._collection("teams").stream():
+            team = Team.model_validate(team_doc.to_dict())
+            if volunteer_id not in team.member_ids:
+                continue
+            team.member_ids = [item for item in team.member_ids if item != volunteer_id]
+            team_doc.reference.set(team.model_dump(mode="json"))
+        for dispatch_doc in self._collection("dispatches").stream():
+            assignment = AssignmentDecision.model_validate(dispatch_doc.to_dict())
+            if volunteer_id not in assignment.volunteer_ids:
+                continue
+            assignment.volunteer_ids = [item for item in assignment.volunteer_ids if item != volunteer_id]
+            dispatch_doc.reference.set(assignment.model_dump(mode="json"))
+        self._collection("volunteers").document(volunteer_id).delete()
+        self._record_delete_audit("volunteer", volunteer_id, volunteer.org_id, actor)
+
     def list_teams(self) -> list[Team]:
         return [Team.model_validate(doc.to_dict()) for doc in self._collection("teams").stream()]
 
@@ -192,9 +300,55 @@ class FirestoreRepository(Repository):
         self._collection("teams").document(team.team_id).set(team.model_dump(mode="json"))
         return team
 
+    def delete_team(self, team_id: str, actor: UserContext) -> None:
+        team_doc = self._collection("teams").document(team_id).get()
+        if not team_doc.exists:
+            raise KeyError(team_id)
+        team = Team.model_validate(team_doc.to_dict())
+        self._require_org_scope(team.org_id, actor)
+        for doc in self._collection("dispatches").where("team_id", "==", team_id).stream():
+            assignment = AssignmentDecision.model_validate(doc.to_dict())
+            assignment.team_id = None
+            doc.reference.set(assignment.model_dump(mode="json"))
+        token_ids = set(
+            self._delete_docs(
+                self._collection("info_tokens")
+                .where("linked_entity_type", "==", "TEAM")
+                .where("linked_entity_id", "==", team_id)
+                .stream()
+            )
+        )
+        self._delete_vectors_for(team_id, token_ids)
+        self._collection("teams").document(team_id).delete()
+        self._record_delete_audit("team", team_id, team.org_id, actor)
+
     def save_resource(self, resource: ResourceInventory) -> ResourceInventory:
         self._collection("resources").document(resource.resource_id).set(resource.model_dump(mode="json"))
         return resource
+
+    def delete_resource(self, resource_id: str, actor: UserContext) -> None:
+        resource_doc = self._collection("resources").document(resource_id).get()
+        if not resource_doc.exists:
+            raise KeyError(resource_id)
+        resource = ResourceInventory.model_validate(resource_doc.to_dict())
+        self._require_org_scope(resource.org_id, actor)
+        for doc in self._collection("dispatches").stream():
+            assignment = AssignmentDecision.model_validate(doc.to_dict())
+            if resource_id not in assignment.resource_ids:
+                continue
+            assignment.resource_ids = [item for item in assignment.resource_ids if item != resource_id]
+            doc.reference.set(assignment.model_dump(mode="json"))
+        token_ids = set(
+            self._delete_docs(
+                self._collection("info_tokens")
+                .where("linked_entity_type", "==", "RESOURCE")
+                .where("linked_entity_id", "==", resource_id)
+                .stream()
+            )
+        )
+        self._delete_vectors_for(resource_id, token_ids)
+        self._collection("resources").document(resource_id).delete()
+        self._record_delete_audit("resource", resource_id, resource.org_id, actor)
 
     def save_recommendations(self, case_id: str, recommendations: list[Recommendation]) -> None:
         self._collection("incidents").document(case_id).update(
@@ -265,6 +419,69 @@ class FirestoreRepository(Repository):
             AssignmentDecision.model_validate(doc.to_dict())
             for doc in self._collection("dispatches").stream()
         ]
+
+    def delete_assignment(self, assignment_id: str, actor: UserContext) -> None:
+        assignment_ref = self._collection("dispatches").document(assignment_id)
+        assignment_doc = assignment_ref.get()
+        if not assignment_doc.exists:
+            raise KeyError(assignment_id)
+        assignment = AssignmentDecision.model_validate(assignment_doc.to_dict())
+        self._require_org_scope(assignment.org_id, actor)
+
+        @firestore.transactional
+        def _write(transaction: firestore.Transaction) -> None:
+            transaction.delete(assignment_ref)
+            incident_ref = self._collection("incidents").document(assignment.case_id)
+            incident_doc = incident_ref.get(transaction=transaction)
+            if incident_doc.exists:
+                incident = CaseRecord.model_validate(incident_doc.to_dict())
+                if incident.final_dispatch_id == assignment_id:
+                    incident.final_dispatch_id = None
+                    incident.status = CaseStatus.SCORED if incident.priority_score is not None else CaseStatus.NEW
+                    transaction.set(incident_ref, incident.model_dump(mode="json"))
+            if assignment.team_id:
+                team_ref = self._collection("teams").document(assignment.team_id)
+                team_doc = team_ref.get(transaction=transaction)
+                if team_doc.exists:
+                    team = Team.model_validate(team_doc.to_dict())
+                    team.active_dispatches = max(team.active_dispatches - 1, 0)
+                    if team.active_dispatches == 0:
+                        team.availability_status = AvailabilityStatus.AVAILABLE
+                    transaction.set(team_ref, team.model_dump(mode="json"))
+            for volunteer_id in assignment.volunteer_ids:
+                volunteer_ref = self._collection("volunteers").document(volunteer_id)
+                volunteer_doc = volunteer_ref.get(transaction=transaction)
+                if not volunteer_doc.exists:
+                    continue
+                volunteer = Volunteer.model_validate(volunteer_doc.to_dict())
+                volunteer.active_assignments = max(volunteer.active_assignments - 1, 0)
+                if volunteer.active_assignments == 0:
+                    volunteer.availability_status = AvailabilityStatus.AVAILABLE
+                transaction.set(volunteer_ref, volunteer.model_dump(mode="json"))
+            for resource_id in assignment.resource_ids:
+                resource_ref = self._collection("resources").document(resource_id)
+                resource_doc = resource_ref.get(transaction=transaction)
+                if not resource_doc.exists:
+                    continue
+                resource = ResourceInventory.model_validate(resource_doc.to_dict())
+                resource.quantity_available += 1
+                transaction.set(resource_ref, resource.model_dump(mode="json"))
+
+        transaction = self.client.transaction()
+        _write(transaction)
+        for allocation in assignment.resource_allocations:
+            for resource_doc in (
+                self._collection("resources")
+                .where("org_id", "==", actor.active_org_id)
+                .where("resource_type", "==", allocation.resource_type)
+                .limit(1)
+                .stream()
+            ):
+                resource = ResourceInventory.model_validate(resource_doc.to_dict())
+                resource.quantity_available += allocation.quantity or 1
+                resource_doc.reference.set(resource.model_dump(mode="json"))
+                break
+        self._record_delete_audit("dispatch", assignment_id, assignment.org_id, actor)
 
     def merge_case(self, case_id: str, merge_into_case_id: str, actor: UserContext) -> None:
         self._collection("incidents").document(case_id).update({"status": CaseStatus.MERGED})
@@ -402,6 +619,37 @@ class FirestoreRepository(Repository):
     def get_ingestion_job(self, job_id: str) -> IngestionJob:
         doc = self._collection("ingestion_jobs").document(job_id).get()
         return IngestionJob.model_validate(doc.to_dict())
+
+    def delete_ingestion_job(self, job_id: str, actor: UserContext) -> None:
+        job_doc = self._collection("ingestion_jobs").document(job_id).get()
+        if not job_doc.exists:
+            raise KeyError(job_id)
+        job = IngestionJob.model_validate(job_doc.to_dict())
+        self._require_org_scope(job.org_id, actor)
+        for case_id in list(job.produced_case_ids):
+            case_doc = self._collection("incidents").document(case_id).get()
+            if case_doc.exists:
+                self.delete_case(case_id, actor)
+        produced_tokens: list[InfoToken] = []
+        for token_id in job.produced_token_ids:
+            token_doc = self._collection("info_tokens").document(token_id).get()
+            if token_doc.exists:
+                produced_tokens.append(InfoToken.model_validate(token_doc.to_dict()))
+        for token in produced_tokens:
+            if token.linked_entity_type == "TEAM" and token.linked_entity_id:
+                team_doc = self._collection("teams").document(token.linked_entity_id).get()
+                if team_doc.exists:
+                    self.delete_team(token.linked_entity_id, actor)
+            elif token.linked_entity_type == "RESOURCE" and token.linked_entity_id:
+                resource_doc = self._collection("resources").document(token.linked_entity_id).get()
+                if resource_doc.exists:
+                    self.delete_resource(token.linked_entity_id, actor)
+        self._collection("ingestion_jobs").document(job_id).delete()
+        for token_id in job.produced_token_ids:
+            self._collection("info_tokens").document(token_id).delete()
+            self._delete_query("vector_records", "token_id", token_id)
+        self._delete_array_contains("vector_records", "source_refs", job_id)
+        self._record_delete_audit("ingestion_job", job_id, job.org_id, actor)
 
     def get_user_profile(self, uid: str) -> UserProfile | None:
         doc = self._collection("users").document(uid).get()
@@ -622,6 +870,121 @@ class FirestoreRepository(Repository):
     def record_audit_event(self, event: AuditEvent) -> None:
         self._collection("audit_events").document(event.audit_id).set(event.model_dump(mode="json"))
 
+    def reset_organization_data(self, org_id: str, actor: UserContext) -> dict[str, int]:
+        if actor.active_org_id != org_id:
+            raise PermissionError("Can only reset the active organization.")
+
+        counts = {
+            "incidents": 0,
+            "incident_events": 0,
+            "duplicate_links": 0,
+            "dispatches": 0,
+            "teams": 0,
+            "volunteers": 0,
+            "resources": 0,
+            "info_tokens": 0,
+            "vector_records": 0,
+            "evidence_items": 0,
+            "ingestion_jobs": 0,
+            "agent_runs": 0,
+            "audit_events": 0,
+        }
+        seen_by_collection: dict[str, set[str]] = {key: set() for key in counts}
+
+        def delete_doc_once(collection_name: str, doc) -> bool:
+            if doc.id in seen_by_collection[collection_name]:
+                return False
+            seen_by_collection[collection_name].add(doc.id)
+            doc.reference.delete()
+            counts[collection_name] += 1
+            return True
+
+        incident_docs = list(self._collection("incidents").where("org_id", "==", org_id).stream())
+        case_ids = {doc.id for doc in incident_docs}
+        team_docs = list(self._collection("teams").where("org_id", "==", org_id).stream())
+        team_ids = {doc.id for doc in team_docs}
+        volunteer_docs = list(self._collection("volunteers").where("org_id", "==", org_id).stream())
+        volunteer_ids = {doc.id for doc in volunteer_docs}
+        resource_docs = list(self._collection("resources").where("org_id", "==", org_id).stream())
+        resource_ids = {doc.id for doc in resource_docs}
+
+        for doc in incident_docs:
+            delete_doc_once("incidents", doc)
+
+        for doc in self._collection("incident_events").where("org_id", "==", org_id).stream():
+            delete_doc_once("incident_events", doc)
+        for case_id in case_ids:
+            for doc in self._collection("incident_events").where("case_id", "==", case_id).stream():
+                delete_doc_once("incident_events", doc)
+            for doc in self._collection("duplicate_links").where("case_id", "==", case_id).stream():
+                delete_doc_once("duplicate_links", doc)
+            for doc in self._collection("duplicate_links").where("other_case_id", "==", case_id).stream():
+                delete_doc_once("duplicate_links", doc)
+            for doc in self._collection("dispatches").where("case_id", "==", case_id).stream():
+                delete_doc_once("dispatches", doc)
+
+        for doc in self._collection("dispatches").where("org_id", "==", org_id).stream():
+            delete_doc_once("dispatches", doc)
+        for doc in team_docs:
+            delete_doc_once("teams", doc)
+        for doc in volunteer_docs:
+            delete_doc_once("volunteers", doc)
+        for doc in resource_docs:
+            delete_doc_once("resources", doc)
+
+        removed_record_ids = case_ids | team_ids | volunteer_ids | resource_ids
+        token_ids: set[str] = set()
+        token_docs = list(self._collection("info_tokens").where("org_id", "==", org_id).stream())
+        for case_id in case_ids:
+            token_docs.extend(self._collection("info_tokens").where("case_id", "==", case_id).stream())
+        for record_id in removed_record_ids:
+            token_docs.extend(self._collection("info_tokens").where("linked_entity_id", "==", record_id).stream())
+        for doc in token_docs:
+            if doc.id in seen_by_collection["info_tokens"]:
+                continue
+            token_ids.add(doc.id)
+            delete_doc_once("info_tokens", doc)
+
+        evidence_docs = list(self._collection("evidence_items").where("org_id", "==", org_id).stream())
+        for case_id in case_ids:
+            evidence_docs.extend(self._collection("evidence_items").where("incident_id", "==", case_id).stream())
+        for record_id in removed_record_ids:
+            evidence_docs.extend(self._collection("evidence_items").where("linked_entity_id", "==", record_id).stream())
+        for doc in evidence_docs:
+            if doc.id in seen_by_collection["evidence_items"]:
+                continue
+            evidence = EvidenceItem.model_validate(doc.to_dict())
+            self._delete_storage_path(evidence.storage_path)
+            delete_doc_once("evidence_items", doc)
+
+        for doc in self._collection("ingestion_jobs").where("org_id", "==", org_id).stream():
+            delete_doc_once("ingestion_jobs", doc)
+        for doc in self._collection("agent_runs").where("org_id", "==", org_id).stream():
+            delete_doc_once("agent_runs", doc)
+
+        vector_docs = list(self._collection("vector_records").where("org_id", "==", org_id).stream())
+        for record_id in removed_record_ids:
+            vector_docs.extend(self._collection("vector_records").where("record_id", "==", record_id).stream())
+        for token_id in token_ids:
+            vector_docs.extend(self._collection("vector_records").where("token_id", "==", token_id).stream())
+        for doc in vector_docs:
+            delete_doc_once("vector_records", doc)
+
+        for doc in self._collection("audit_events").where("org_id", "==", org_id).stream():
+            delete_doc_once("audit_events", doc)
+
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action="ORG_DATA_RESET",
+                object_ref=org_id,
+                payload={"deleted_counts": counts},
+            )
+        )
+        return counts
+
     def save_graph_run(self, run: GraphRun) -> GraphRun:
         run.updated_at = datetime.now(tz=UTC)
         self._collection("agent_runs").document(run.run_id).set(run.model_dump(mode="json"))
@@ -630,6 +993,15 @@ class FirestoreRepository(Repository):
     def get_graph_run(self, run_id: str) -> GraphRun:
         doc = self._collection("agent_runs").document(run_id).get()
         return GraphRun.model_validate(doc.to_dict())
+
+    def delete_graph_run(self, run_id: str, actor: UserContext) -> None:
+        run_doc = self._collection("agent_runs").document(run_id).get()
+        if not run_doc.exists:
+            raise KeyError(run_id)
+        run = GraphRun.model_validate(run_doc.to_dict())
+        self._require_org_scope(run.org_id, actor)
+        self._collection("agent_runs").document(run_id).delete()
+        self._record_delete_audit("graph_run", run_id, run.org_id, actor)
 
     def save_vector_records(self, records: list[VectorRecord]) -> list[VectorRecord]:
         batch = self.client.batch()

@@ -107,9 +107,33 @@ The sidebar includes an organization selector. API calls include the selected or
 - `/agent/graph3/*`: Combined demo graph entrypoint.
 - `/agent/runs/{run_id}`: Graph run inspection.
 - `/agent/runs/{run_id}/export.csv`: CSV export for run previews and committed records.
+- `/ai/status`: Active AI provider mode, Gemini toggle, Ollama model, reachability, and fallback order.
 - `/dashboard/summary`: Organization-scoped metrics.
 
 All operational routes are backend-first. The frontend uses Firebase directly only for sign-in and public client SDK setup.
+
+## 6.1 Local AI Provider Modes
+
+The backend can run without spending Gemini credits during local testing.
+
+Recommended local settings:
+
+```env
+AI_PROVIDER=ollama
+GEMINI_ENABLED=false
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=gemma4:e2b
+OLLAMA_TIMEOUT_SECONDS=90
+```
+
+Provider behavior:
+
+- `AI_PROVIDER=auto`: try Gemini, then Ollama, then heuristic fallback.
+- `AI_PROVIDER=ollama`: try local Ollama first, then heuristic fallback.
+- `AI_PROVIDER=gemini`: try Gemini first, then heuristic fallback.
+- `AI_PROVIDER=heuristic`: never call a model; use deterministic extraction only.
+
+The Imports page shows the current provider mode and whether Ollama is reachable. Graph 1 draft cards also show `provider_used`, fallback reasons, parse warnings, and schema validation status.
 
 ## 7. Graph 1: Source to Operational Records
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.dependencies import get_repository
@@ -12,6 +14,8 @@ from app.models.domain import (
     OrganizationResponse,
     OrganizationsResponse,
     OrgRole,
+    ResetOrganizationDataRequest,
+    ResetOrganizationDataResponse,
     UpdateMemberRequest,
     UserContext,
 )
@@ -84,6 +88,29 @@ def remove_member(org_id: str, membership_id: str, actor: UserContext = Depends(
         )
     member = get_repository().update_org_member(org_id, membership_id, None, MembershipStatus.REMOVED, actor)
     return {"member": member, "status": "REMOVED"}
+
+
+@router.post("/{org_id}/reset-data", response_model=ResetOrganizationDataResponse)
+def reset_organization_data(
+    org_id: str,
+    payload: ResetOrganizationDataRequest,
+    actor: UserContext = Depends(get_current_user),
+):
+    _require_host(org_id, actor)
+    if payload.confirmation != "RESET_ORG_DATA":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Type RESET_ORG_DATA to confirm organization data reset.",
+        )
+    try:
+        counts = get_repository().reset_organization_data(org_id, actor)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    return ResetOrganizationDataResponse(
+        org_id=org_id,
+        deleted_counts=counts,
+        request_id=f"req-{uuid.uuid4().hex[:12]}",
+    )
 
 
 def _require_host(org_id: str, actor: UserContext):

@@ -26,6 +26,7 @@ from app.models.domain import (
     CaseStatus,
     CreateCaseRequest,
     CreateCaseResponse,
+    DeleteResponse,
     ExtractCaseResponse,
     LocationConfidence,
     MergeCaseRequest,
@@ -64,7 +65,7 @@ def list_cases(
     items = [
         item
         for item in repository.list_cases(status=status, urgency=urgency)
-        if item.org_id in {None, actor.active_org_id}
+        if item.org_id == actor.active_org_id
     ]
     return CaseListResponse(items=items)
 
@@ -74,6 +75,22 @@ def get_case(case_id: str, actor: UserContext = Depends(get_current_org_user)):
     repository = get_repository()
     _require_case_org(repository.get_case(case_id), actor)
     return repository.get_case_detail(case_id)
+
+
+@router.delete("/{case_id}", response_model=DeleteResponse)
+def delete_case(case_id: str, actor: UserContext = Depends(get_current_org_user)):
+    repository = get_repository()
+    try:
+        repository.delete_case(case_id, actor)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Incident not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return DeleteResponse(
+        deleted_id=case_id,
+        deleted_type="incident",
+        request_id=f"req-{uuid.uuid4().hex[:12]}",
+    )
 
 
 @router.post("/{case_id}/extract", response_model=ExtractCaseResponse)
@@ -119,7 +136,7 @@ async def extract_case(
     candidates = [
         item
         for item in repository.list_recent_open_cases(case_id)
-        if item.org_id in {None, actor.active_org_id}
+        if item.org_id == actor.active_org_id
     ]
     duplicates = duplicate_service.find_duplicates(case, candidates)
     repository.save_duplicate_links(case_id, duplicates)
@@ -178,14 +195,14 @@ async def recommend_case(
     settings = get_settings()
     case = repository.get_case(case_id)
     _require_case_org(case, actor)
-    teams = [item for item in repository.list_teams() if item.org_id in {None, actor.active_org_id}]
+    teams = [item for item in repository.list_teams() if item.org_id == actor.active_org_id]
     team_lookup = {item.team_id: item for item in teams}
     max_results = min(max_results, settings.default_max_recommendations)
     recommendations, reason = matcher.recommend(
         case,
         teams,
-        [item for item in repository.list_volunteers() if item.org_id in {None, actor.active_org_id}],
-        [item for item in repository.list_resources() if item.org_id in {None, actor.active_org_id}],
+        [item for item in repository.list_volunteers() if item.org_id == actor.active_org_id],
+        [item for item in repository.list_resources() if item.org_id == actor.active_org_id],
         max_results,
     )
 
@@ -314,5 +331,5 @@ def merge_case(
 
 
 def _require_case_org(case, actor: UserContext) -> None:
-    if case.org_id not in {None, actor.active_org_id}:
+    if case.org_id != actor.active_org_id:
         raise HTTPException(status_code=403, detail="Incident belongs to another organization.")

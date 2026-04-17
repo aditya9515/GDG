@@ -14,7 +14,7 @@ class VectorService:
         self.client = genai.Client(api_key=settings.gemini_api_key) if settings.gemini_api_key else None
 
     def embed(self, text: str) -> list[float]:
-        if self.client and self.settings.extraction_provider in {"auto", "gemini"}:
+        if self.client and self.settings.gemini_enabled and "gemini" in self.settings.provider_fallback_order:
             try:
                 response = self.client.models.embed_content(
                     model="gemini-embedding-001",

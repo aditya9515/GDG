@@ -13,10 +13,10 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(actor: UserContext = Depends(get_current_org_user)):
     repository = get_repository()
-    cases = [item for item in repository.list_cases() if item.org_id in {None, actor.active_org_id}]
-    assignments = [item for item in repository.list_assignments() if item.org_id in {None, actor.active_org_id}]
-    resources = [item for item in repository.list_resources() if item.org_id in {None, actor.active_org_id}]
-    teams = [item for item in repository.list_teams() if item.org_id in {None, actor.active_org_id}]
+    cases = [item for item in repository.list_cases() if item.org_id == actor.active_org_id]
+    assignments = [item for item in repository.list_assignments() if item.org_id == actor.active_org_id]
+    resources = [item for item in repository.list_resources() if item.org_id == actor.active_org_id]
+    teams = [item for item in repository.list_teams() if item.org_id == actor.active_org_id]
     open_cases = [case for case in cases if case.status not in {"MERGED", "CLOSED"}]
     confidence_values = [case.extracted_json.confidence for case in cases if case.extracted_json]
     return DashboardSummary(

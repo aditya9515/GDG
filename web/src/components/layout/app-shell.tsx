@@ -6,7 +6,8 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/components/providers/auth-provider'
 
 const navItems = [
-  ['Command Center', '/command-center'],
+  ['Command', '/command-center'],
+  ['Cases', '/cases'],
   ['Dispatch', '/dispatch'],
   ['Teams', '/teams'],
   ['Volunteers', '/volunteers'],
@@ -21,38 +22,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const visibleNavItems = user?.is_host ? [...navItems, ['Organization', '/organization']] : navItems
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(249,115,22,0.12),_transparent_40%),linear-gradient(180deg,#0d141c,#111827)] text-stone-100">
-      <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 gap-6 px-4 py-4 lg:grid-cols-[260px_1fr] lg:px-6">
-        <aside className="rounded-[1.75rem] border border-white/8 bg-[rgba(13,19,27,0.88)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur">
+    <div className="min-h-screen text-stone-100">
+      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:56px_56px] opacity-35" />
+      <div className="relative mx-auto grid min-h-screen max-w-[1720px] grid-cols-1 gap-2 px-2 py-2 lg:grid-cols-[236px_1fr]">
+        <aside className="surface-card focus-outline motion-rise h-fit p-4 lg:sticky lg:top-2 lg:min-h-[calc(100vh-1rem)]">
           <div className="border-b border-white/8 pb-5">
-            <p className="text-xs uppercase tracking-[0.24em] text-amber-200/80">ReliefOps AI</p>
-            <h1 className="mt-3 text-2xl font-semibold">Maps-First Ops</h1>
-            <p className="mt-2 text-sm leading-6 text-slate-400">Geo-anchor incidents, teams, and resources for faster dispatch.</p>
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-2xl border border-white/10 bg-white text-sm font-black text-slate-950">
+                R
+              </span>
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-500">ReliefOps</p>
+                <h1 className="text-lg font-semibold tracking-[-0.03em] text-white">Command</h1>
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-500">Minimal operations console for map-aware resource allocation.</p>
           </div>
-          <nav className="mt-6 grid gap-2">
+          <nav className="minimal-scrollbar mt-5 flex gap-1.5 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
             {visibleNavItems.map(([label, href]) => {
               const active = pathname === href || pathname.startsWith(`${href}/`)
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                  className={`group flex shrink-0 items-center justify-between rounded-2xl border px-3.5 py-3 text-sm font-medium transition duration-300 lg:shrink ${
                     active
-                      ? 'bg-amber-300/12 text-amber-100 shadow-[inset_0_0_0_1px_rgba(253,186,116,0.28)]'
-                      : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                      ? 'border-white/40 bg-white !text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_12px_28px_rgba(255,255,255,0.08)]'
+                      : 'border-transparent text-slate-400 hover:border-white/10 hover:bg-white/[0.045] hover:text-white'
                   }`}
                 >
-                  {label}
+                  <span>{label}</span>
+                  <span className={`h-1.5 w-1.5 rounded-full transition ${active ? 'bg-black' : 'bg-transparent group-hover:bg-slate-500'}`} />
                 </Link>
               )
             })}
           </nav>
-          <div className="mt-8 rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+          <div className="mt-6 rounded-2xl border border-white/8 bg-black/20 p-4">
             {user?.organizations && user.organizations.length > 0 ? (
-              <label className="mb-4 block text-xs uppercase tracking-[0.2em] text-slate-500">
+              <label className="mb-4 block text-[11px] uppercase tracking-[0.2em] text-slate-500">
                 Organization
                 <select
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-stone-100"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm normal-case tracking-normal text-stone-100 outline-none transition focus:border-white/25"
                   value={user.active_org_id ?? ''}
                   onChange={(event) => setActiveOrg(event.target.value)}
                 >
@@ -64,18 +74,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </select>
               </label>
             ) : null}
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Active operator</p>
-            <p className="mt-2 text-sm font-medium text-stone-100">{user?.email ?? user?.uid}</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Operator</p>
+            <p className="mt-2 truncate text-sm font-medium text-stone-100">{user?.email ?? user?.uid}</p>
             <p className="mt-1 text-xs text-slate-500">{user?.role}</p>
             <button
-              className="mt-4 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-white/20 hover:text-white"
+              className="mt-4 w-full rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-white/20 hover:bg-white/[0.03] hover:text-white"
               onClick={() => void logout()}
             >
               Sign out
             </button>
           </div>
         </aside>
-        <main className="rounded-[1.75rem] border border-white/8 bg-[rgba(14,20,28,0.88)] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.32)] backdrop-blur md:p-6">
+        <main className="motion-fade min-w-0 rounded-[1.75rem] border border-white/18 bg-black/82 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_14px_42px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.05] backdrop-blur-xl md:p-4">
           {children}
         </main>
       </div>

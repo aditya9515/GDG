@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "name": "reliefops_test4_map_layers",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "kind": "hazard_zone", "label": "Patna flood inundation belt", "severity": 5 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[85.120,25.585],[85.155,25.585],[85.155,25.612],[85.120,25.612],[85.120,25.585]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "blocked_road", "label": "Ward 7 waterlogged road", "constraint": "AMBULANCE_BLOCKED" },
+      "geometry": { "type": "LineString", "coordinates": [[91.730,26.142],[91.746,26.149]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "hospital", "label": "Guwahati Civil Hospital", "capabilities": "MATERNAL_CARE,AMBULANCE" },
+      "geometry": { "type": "Point", "coordinates": [91.7680,26.1530] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "depot", "label": "Vijayawada Relief Depot", "stock": "FOOD_PACKS,FUEL" },
+      "geometry": { "type": "Point", "coordinates": [80.6320,16.5200] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "shelter", "label": "Government School Relief Camp Cuttack", "population": 180 },
+      "geometry": { "type": "Point", "coordinates": [85.8828,20.4625] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "staging_area", "label": "Patna water rescue staging", "team": "TEAM-WATER-01" },
+      "geometry": { "type": "Point", "coordinates": [85.1400,25.6060] }
+    }
+  ]
+}

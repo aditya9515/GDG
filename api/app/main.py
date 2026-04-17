@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import agents, cases, dashboard, evals, incidents, operations, organizations
+from app.api.routes import agents, ai, cases, dashboard, evals, incidents, operations, organizations
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -23,6 +23,14 @@ async def lifespan(_: FastAPI):
         settings.firebase_project_id or "unset",
         "configured" if settings.google_maps_api_key else "unset",
         settings.firebase_storage_bucket or "unset",
+    )
+    logger.info(
+        "AI provider=%s fallback_order=%s gemini=%s ollama_model=%s ollama_url=%s",
+        settings.resolved_ai_provider,
+        " -> ".join(settings.provider_fallback_order),
+        "enabled" if settings.gemini_enabled else "disabled",
+        settings.ollama_model,
+        settings.ollama_base_url,
     )
     if settings.firebase_project_id and settings.resolved_repository_backend != "firestore":
         logger.warning(
@@ -60,6 +68,7 @@ app.include_router(evals.router)
 app.include_router(operations.router)
 app.include_router(organizations.router)
 app.include_router(agents.router)
+app.include_router(ai.router)
 
 
 @app.get("/health", tags=["system"])

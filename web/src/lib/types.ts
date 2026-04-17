@@ -275,6 +275,16 @@ export interface GraphRun {
   error_message: string | null
 }
 
+export interface AiStatusResponse {
+  provider_mode: string
+  gemini_enabled: boolean
+  gemini_configured: boolean
+  ollama_base_url: string
+  ollama_model: string
+  ollama_reachable: boolean
+  fallback_order: string[]
+}
+
 export interface Team {
   team_id: string
   display_name: string
@@ -408,4 +418,11 @@ export interface AuthSessionResponse {
   default_org_id: string | null
   active_org_id: string | null
   is_host: boolean
+}
+
+export interface ResetOrganizationDataResponse {
+  status: string
+  org_id: string
+  deleted_counts: Record<string, number>
+  request_id: string
 }

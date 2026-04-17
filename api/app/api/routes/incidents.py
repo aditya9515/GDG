@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.routes.cases import (
     assign_case as assign_dispatch,
     create_case as create_incident,
+    delete_case as delete_incident,
     extract_case as extract_incident,
     get_case as get_incident,
     merge_case as merge_incident,
@@ -21,6 +22,7 @@ from app.models.domain import (
     CaseListResponse,
     CreateCaseRequest,
     CreateCaseResponse,
+    DeleteResponse,
     ExtractCaseResponse,
     MergeCaseRequest,
     MergeCaseResponse,
@@ -46,7 +48,7 @@ def list_incidents(
     actor: UserContext = Depends(get_current_org_user),
 ):
     items = get_repository().list_cases(status=status, urgency=urgency)
-    items = [item for item in items if item.org_id in {None, actor.active_org_id}]
+    items = [item for item in items if item.org_id == actor.active_org_id]
     if location_confidence:
         items = [item for item in items if item.location_confidence == location_confidence]
     return CaseListResponse(items=items)
@@ -55,6 +57,16 @@ def list_incidents(
 @router.get("/{case_id}", response_model=CaseDetailResponse)
 def get_incident_route(case_id: str, actor: UserContext = Depends(get_current_org_user)):
     return get_incident(case_id, actor)
+
+
+@router.delete("/{case_id}", response_model=DeleteResponse)
+def delete_incident_route(case_id: str, actor: UserContext = Depends(get_current_org_user)):
+    try:
+        return delete_incident(case_id, actor)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Unable to delete incident.") from exc
 
 
 @router.post("/{case_id}/extract", response_model=ExtractCaseResponse)

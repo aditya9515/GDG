@@ -162,6 +162,7 @@ class MemoryRepository(Repository):
             first = members[0]
             teams[team_id] = Team(
                 team_id=team_id,
+                org_id=first.org_id,
                 display_name=team_names[team_id],
                 capability_tags=sorted(team_capabilities.get(team_id, set())),
                 member_ids=[member.volunteer_id for member in members],
@@ -260,6 +261,28 @@ class MemoryRepository(Repository):
         self.info_tokens[token.token_id] = token
         case.info_token_ids.append(token.token_id)
 
+    def _require_org_scope(self, org_id: str | None, actor: UserContext) -> None:
+        if org_id != actor.active_org_id:
+            raise PermissionError("Record belongs to another organization.")
+
+    def _delete_vectors_for(self, record_id: str, token_ids: set[str] | None = None) -> None:
+        token_ids = token_ids or set()
+        for vector_id, vector in list(self.vector_records.items()):
+            if vector.record_id == record_id or (vector.token_id and vector.token_id in token_ids):
+                self.vector_records.pop(vector_id, None)
+
+    def _record_delete_audit(self, deleted_type: str, deleted_id: str, org_id: str | None, actor: UserContext) -> None:
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action=f"{deleted_type.upper()}_DELETED",
+                object_ref=deleted_id,
+                payload={"deleted_type": deleted_type},
+            )
+        )
+
     def create_case(self, raw_input: str, source_channel: str, actor: UserContext) -> CaseRecord:
         case = CaseRecord(
             case_id=f"CASE-{uuid.uuid4().hex[:8].upper()}",
@@ -306,6 +329,37 @@ class MemoryRepository(Repository):
             evidence_items=self.list_evidence_for_case(case_id),
             dispatches=[item for item in self.assignments.values() if item.case_id == case_id],
         )
+
+    def delete_case(self, case_id: str, actor: UserContext) -> None:
+        case = self.cases[case_id]
+        self._require_org_scope(case.org_id, actor)
+        for assignment_id, assignment in list(self.assignments.items()):
+            if assignment.case_id == case_id:
+                self.assignments.pop(assignment_id, None)
+        token_ids = {
+            token_id
+            for token_id, token in self.info_tokens.items()
+            if token.case_id == case_id or token.linked_entity_id == case_id
+        }
+        for token_id in token_ids:
+            self.info_tokens.pop(token_id, None)
+        for evidence_id, evidence in list(self.evidence_items.items()):
+            if evidence.incident_id == case_id or evidence.linked_entity_id == case_id:
+                self.evidence_items.pop(evidence_id, None)
+        self.events.pop(case_id, None)
+        self.duplicates.pop(case_id, None)
+        for linked_case_id, links in list(self.duplicates.items()):
+            kept = [link for link in links if link.other_case_id != case_id]
+            if kept:
+                self.duplicates[linked_case_id] = kept
+            else:
+                self.duplicates.pop(linked_case_id, None)
+                if linked_case_id in self.cases:
+                    self.cases[linked_case_id].duplicate_status = DuplicateStatus.NONE
+        self.recommendations.pop(case_id, None)
+        self._delete_vectors_for(case_id, token_ids)
+        self.cases.pop(case_id, None)
+        self._record_delete_audit("incident", case_id, case.org_id, actor)
 
     def save_extraction(self, case_id: str, extraction: IncidentExtraction, status: str) -> CaseRecord:
         case = self.cases[case_id]
@@ -366,6 +420,16 @@ class MemoryRepository(Repository):
     def list_volunteers(self) -> list[Volunteer]:
         return list(self.volunteers.values())
 
+    def delete_volunteer(self, volunteer_id: str, actor: UserContext) -> None:
+        volunteer = self.volunteers[volunteer_id]
+        self._require_org_scope(volunteer.org_id, actor)
+        for team in self.teams.values():
+            team.member_ids = [item for item in team.member_ids if item != volunteer_id]
+        for assignment in self.assignments.values():
+            assignment.volunteer_ids = [item for item in assignment.volunteer_ids if item != volunteer_id]
+        self.volunteers.pop(volunteer_id, None)
+        self._record_delete_audit("volunteer", volunteer_id, volunteer.org_id, actor)
+
     def list_teams(self) -> list[Team]:
         return list(self.teams.values())
 
@@ -376,9 +440,42 @@ class MemoryRepository(Repository):
         self.teams[team.team_id] = team
         return team
 
+    def delete_team(self, team_id: str, actor: UserContext) -> None:
+        team = self.teams[team_id]
+        self._require_org_scope(team.org_id, actor)
+        for assignment in self.assignments.values():
+            if assignment.team_id == team_id:
+                assignment.team_id = None
+        token_ids = {
+            token_id
+            for token_id, token in self.info_tokens.items()
+            if token.linked_entity_type == "TEAM" and token.linked_entity_id == team_id
+        }
+        for token_id in token_ids:
+            self.info_tokens.pop(token_id, None)
+        self._delete_vectors_for(team_id, token_ids)
+        self.teams.pop(team_id, None)
+        self._record_delete_audit("team", team_id, team.org_id, actor)
+
     def save_resource(self, resource: ResourceInventory) -> ResourceInventory:
         self.resources[resource.resource_id] = resource
         return resource
+
+    def delete_resource(self, resource_id: str, actor: UserContext) -> None:
+        resource = self.resources[resource_id]
+        self._require_org_scope(resource.org_id, actor)
+        for assignment in self.assignments.values():
+            assignment.resource_ids = [item for item in assignment.resource_ids if item != resource_id]
+        token_ids = {
+            token_id
+            for token_id, token in self.info_tokens.items()
+            if token.linked_entity_type == "RESOURCE" and token.linked_entity_id == resource_id
+        }
+        for token_id in token_ids:
+            self.info_tokens.pop(token_id, None)
+        self._delete_vectors_for(resource_id, token_ids)
+        self.resources.pop(resource_id, None)
+        self._record_delete_audit("resource", resource_id, resource.org_id, actor)
 
     def save_recommendations(self, case_id: str, recommendations: list[Recommendation]) -> None:
         self.recommendations[case_id] = recommendations
@@ -425,6 +522,41 @@ class MemoryRepository(Repository):
 
     def list_assignments(self) -> list[AssignmentDecision]:
         return sorted(self.assignments.values(), key=lambda item: item.confirmed_at, reverse=True)
+
+    def delete_assignment(self, assignment_id: str, actor: UserContext) -> None:
+        assignment = self.assignments[assignment_id]
+        self._require_org_scope(assignment.org_id, actor)
+        if assignment.case_id in self.cases:
+            case = self.cases[assignment.case_id]
+            if case.final_dispatch_id == assignment_id:
+                case.final_dispatch_id = None
+                case.status = CaseStatus.SCORED if case.priority_score is not None else CaseStatus.NEW
+                self.cases[case.case_id] = case
+        if assignment.team_id and assignment.team_id in self.teams:
+            team = self.teams[assignment.team_id]
+            team.active_dispatches = max(team.active_dispatches - 1, 0)
+            if team.active_dispatches == 0:
+                team.availability_status = AvailabilityStatus.AVAILABLE
+            self.teams[team.team_id] = team
+        for volunteer_id in assignment.volunteer_ids:
+            if volunteer_id not in self.volunteers:
+                continue
+            volunteer = self.volunteers[volunteer_id]
+            volunteer.active_assignments = max(volunteer.active_assignments - 1, 0)
+            if volunteer.active_assignments == 0:
+                volunteer.availability_status = AvailabilityStatus.AVAILABLE
+            self.volunteers[volunteer_id] = volunteer
+        for resource_id in assignment.resource_ids:
+            if resource_id in self.resources:
+                self.resources[resource_id].quantity_available += 1
+        for allocation in assignment.resource_allocations:
+            for resource in self.resources.values():
+                if resource.org_id != actor.active_org_id or resource.resource_type != allocation.resource_type:
+                    continue
+                resource.quantity_available += allocation.quantity or 1
+                break
+        self.assignments.pop(assignment_id, None)
+        self._record_delete_audit("dispatch", assignment_id, assignment.org_id, actor)
 
     def merge_case(self, case_id: str, merge_into_case_id: str, actor: UserContext) -> None:
         case = self.cases[case_id]
@@ -551,6 +683,26 @@ class MemoryRepository(Repository):
 
     def get_ingestion_job(self, job_id: str) -> IngestionJob:
         return self.ingestion_jobs[job_id]
+
+    def delete_ingestion_job(self, job_id: str, actor: UserContext) -> None:
+        job = self.ingestion_jobs[job_id]
+        self._require_org_scope(job.org_id, actor)
+        for case_id in list(job.produced_case_ids):
+            if case_id in self.cases:
+                self.delete_case(case_id, actor)
+        produced_tokens = [self.info_tokens[token_id] for token_id in job.produced_token_ids if token_id in self.info_tokens]
+        for token in produced_tokens:
+            if token.linked_entity_type == "TEAM" and token.linked_entity_id in self.teams:
+                self.delete_team(token.linked_entity_id, actor)
+            elif token.linked_entity_type == "RESOURCE" and token.linked_entity_id in self.resources:
+                self.delete_resource(token.linked_entity_id, actor)
+        self.ingestion_jobs.pop(job_id, None)
+        for token_id in list(job.produced_token_ids):
+            self.info_tokens.pop(token_id, None)
+        for vector_id, vector in list(self.vector_records.items()):
+            if job_id in vector.source_refs:
+                self.vector_records.pop(vector_id, None)
+        self._record_delete_audit("ingestion_job", job_id, job.org_id, actor)
 
     def get_user_profile(self, uid: str) -> UserProfile | None:
         return self.users.get(uid)
@@ -716,6 +868,118 @@ class MemoryRepository(Repository):
     def record_audit_event(self, event: AuditEvent) -> None:
         self.audit_events[event.audit_id] = event
 
+    def reset_organization_data(self, org_id: str, actor: UserContext) -> dict[str, int]:
+        if actor.active_org_id != org_id:
+            raise PermissionError("Can only reset the active organization.")
+
+        counts = {
+            "incidents": 0,
+            "incident_events": 0,
+            "duplicate_links": 0,
+            "dispatches": 0,
+            "teams": 0,
+            "volunteers": 0,
+            "resources": 0,
+            "info_tokens": 0,
+            "vector_records": 0,
+            "evidence_items": 0,
+            "ingestion_jobs": 0,
+            "agent_runs": 0,
+            "audit_events": 0,
+        }
+
+        case_ids = {case_id for case_id, case in self.cases.items() if case.org_id == org_id}
+        team_ids = {team_id for team_id, team in self.teams.items() if team.org_id == org_id}
+        volunteer_ids = {volunteer_id for volunteer_id, volunteer in self.volunteers.items() if volunteer.org_id == org_id}
+        resource_ids = {resource_id for resource_id, resource in self.resources.items() if resource.org_id == org_id}
+
+        for case_id in list(case_ids):
+            self.cases.pop(case_id, None)
+            counts["incidents"] += 1
+            counts["incident_events"] += len(self.events.pop(case_id, []))
+            counts["duplicate_links"] += len(self.duplicates.pop(case_id, []))
+            self.recommendations.pop(case_id, None)
+
+        for linked_case_id, links in list(self.duplicates.items()):
+            kept = [link for link in links if link.other_case_id not in case_ids]
+            counts["duplicate_links"] += len(links) - len(kept)
+            if kept:
+                self.duplicates[linked_case_id] = kept
+            else:
+                self.duplicates.pop(linked_case_id, None)
+
+        for assignment_id, assignment in list(self.assignments.items()):
+            if assignment.org_id == org_id or assignment.case_id in case_ids:
+                self.assignments.pop(assignment_id, None)
+                counts["dispatches"] += 1
+
+        for team_id in list(team_ids):
+            self.teams.pop(team_id, None)
+            counts["teams"] += 1
+        for volunteer_id in list(volunteer_ids):
+            self.volunteers.pop(volunteer_id, None)
+            counts["volunteers"] += 1
+        for resource_id in list(resource_ids):
+            self.resources.pop(resource_id, None)
+            counts["resources"] += 1
+
+        removed_record_ids = case_ids | team_ids | volunteer_ids | resource_ids
+        token_ids: set[str] = set()
+        for token_id, token in list(self.info_tokens.items()):
+            if (
+                token.org_id == org_id
+                or token.case_id in case_ids
+                or (token.linked_entity_id and token.linked_entity_id in removed_record_ids)
+            ):
+                token_ids.add(token_id)
+                self.info_tokens.pop(token_id, None)
+                counts["info_tokens"] += 1
+
+        for evidence_id, evidence in list(self.evidence_items.items()):
+            if (
+                evidence.org_id == org_id
+                or evidence.incident_id in case_ids
+                or (evidence.linked_entity_id and evidence.linked_entity_id in removed_record_ids)
+            ):
+                self.evidence_items.pop(evidence_id, None)
+                counts["evidence_items"] += 1
+
+        for job_id, job in list(self.ingestion_jobs.items()):
+            if job.org_id == org_id:
+                self.ingestion_jobs.pop(job_id, None)
+                counts["ingestion_jobs"] += 1
+
+        for run_id, run in list(self.graph_runs.items()):
+            if run.org_id == org_id:
+                self.graph_runs.pop(run_id, None)
+                counts["agent_runs"] += 1
+
+        for vector_id, vector in list(self.vector_records.items()):
+            if (
+                vector.org_id == org_id
+                or vector.record_id in removed_record_ids
+                or (vector.token_id and vector.token_id in token_ids)
+            ):
+                self.vector_records.pop(vector_id, None)
+                counts["vector_records"] += 1
+
+        for audit_id, audit in list(self.audit_events.items()):
+            if audit.org_id == org_id:
+                self.audit_events.pop(audit_id, None)
+                counts["audit_events"] += 1
+
+        self.record_audit_event(
+            AuditEvent(
+                audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                org_id=org_id,
+                actor_uid=actor.uid,
+                action="ORG_DATA_RESET",
+                object_ref=org_id,
+                payload={"deleted_counts": counts},
+            )
+        )
+        return counts
+
     def save_graph_run(self, run: GraphRun) -> GraphRun:
         run.updated_at = utcnow()
         self.graph_runs[run.run_id] = run
@@ -723,6 +987,12 @@ class MemoryRepository(Repository):
 
     def get_graph_run(self, run_id: str) -> GraphRun:
         return self.graph_runs[run_id]
+
+    def delete_graph_run(self, run_id: str, actor: UserContext) -> None:
+        run = self.graph_runs[run_id]
+        self._require_org_scope(run.org_id, actor)
+        self.graph_runs.pop(run_id, None)
+        self._record_delete_audit("graph_run", run_id, run.org_id, actor)
 
     def save_vector_records(self, records: list[VectorRecord]) -> list[VectorRecord]:
         for record in records:

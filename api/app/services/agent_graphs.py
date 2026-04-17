@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import uuid
 import re
 from typing import Any, TypedDict
@@ -12,14 +14,23 @@ except Exception:  # pragma: no cover - fallback keeps local demos alive if opti
 
 from app.models.domain import (
     AssignmentDecision,
+    AuditEvent,
+    AvailabilityStatus,
+    CategoryKind,
     CaseEvent,
     CaseStatus,
     DraftRecordType,
+    GeoPoint,
     GraphRun,
     GraphRunRequest,
     GraphRunStatus,
+    IncidentExtraction,
+    InfoTokenType,
+    LocationConfidence,
     RecordDraft,
+    ResourceInventory,
     SourceArtifact,
+    Team,
     UserContext,
     UserQuestion,
     VectorRecord,
@@ -89,6 +100,73 @@ class AgentGraphService:
             )
         )["run"]
 
+    def run_graph1_file(
+        self,
+        *,
+        filename: str,
+        content_type: str,
+        content: bytes,
+        source_kind: str,
+        target: str,
+        operator_prompt: str | None,
+        actor: UserContext,
+    ) -> GraphRun:
+        org_id = actor.active_org_id or "unassigned"
+        normalized_kind = (source_kind or "CSV").upper()
+        warnings: list[str] = []
+        text = ""
+        parsed_structured: dict[str, Any] = {}
+        detected_languages = ["en"]
+        ocr_used = False
+
+        if normalized_kind == "CSV" or filename.lower().endswith(".csv"):
+            text = content.decode("utf-8-sig")
+            drafts, csv_warnings = self._drafts_from_csv_text(text, target, operator_prompt)
+            warnings.extend(csv_warnings)
+            parsed_structured = {"source_kind": "CSV", "row_count": len(drafts)}
+        else:
+            parsed = self.docling.parse_bytes(filename, content_type, content)
+            text = self._prune_and_redact(parsed.markdown)
+            parsed_structured = parsed.structured
+            warnings.extend(parsed.warnings)
+            detected_languages = parsed.detected_languages
+            ocr_used = parsed.ocr_used
+            payload = GraphRunRequest(
+                source_kind=normalized_kind,
+                target=target,
+                text=text,
+                operator_prompt=operator_prompt,
+            )
+            drafts = [self._draft_from_payload(payload, text, parse_warnings=warnings)]
+
+        artifact = SourceArtifact(
+            artifact_id=f"art-{uuid.uuid4().hex[:10]}",
+            org_id=org_id,
+            source_kind=normalized_kind,
+            filename=filename,
+            text=text[:12000],
+            docling_markdown=text,
+            docling_json=parsed_structured,
+            parse_status="COMPLETED",
+            parse_warnings=warnings,
+            detected_languages=detected_languages,
+            ocr_used=ocr_used,
+        )
+        questions = self._questions_for_drafts(drafts)
+        run = GraphRun(
+            run_id=f"run-{uuid.uuid4().hex[:10]}",
+            org_id=org_id,
+            graph_name="source_to_operational_records_graph",
+            status=GraphRunStatus.WAITING_FOR_CONFIRMATION,
+            created_by=actor.uid,
+            source_artifacts=[artifact],
+            drafts=drafts,
+            user_questions=questions,
+            needs_user_input=False,
+            next_action="confirm_or_edit",
+        )
+        return self.repository.save_graph_run(run)
+
     def _graph1_source_loader_node(self, state: AgentGraphState) -> AgentGraphState:
         payload = state["payload"]
         return {"source_text": payload.text or "", "source_kind": payload.source_kind}
@@ -123,7 +201,12 @@ class AgentGraphService:
 
     def _graph1_gemini_draft_node(self, state: AgentGraphState) -> AgentGraphState:
         payload = state["payload"]
-        draft = self._draft_from_payload(payload, state.get("cleaned_markdown", ""))
+        artifact = state.get("artifact")
+        draft = self._draft_from_payload(
+            payload,
+            state.get("cleaned_markdown", ""),
+            parse_warnings=artifact.parse_warnings if artifact else [],
+        )
         return {"draft": draft}
 
     def _graph1_geocode_node(self, state: AgentGraphState) -> AgentGraphState:
@@ -211,10 +294,10 @@ class AgentGraphService:
         actor = state["actor"]
         org_id = actor.active_org_id or "unassigned"
         case = state["case"]
-        if case.org_id not in {None, org_id}:
+        if case.org_id != org_id:
             raise PermissionError("Incident belongs to another organization.")
         questions: list[UserQuestion] = []
-        if case.geo is None or case.location_confidence == "UNKNOWN":
+        if (case.geo is None and not case.location_text) or case.location_confidence == "UNKNOWN":
             questions.append(
                 UserQuestion(
                     question_id="confirm_location",
@@ -230,9 +313,9 @@ class AgentGraphService:
     def _graph2_planning_node(self, state: AgentGraphState) -> AgentGraphState:
         case = state["case"]
         org_id = state["actor"].active_org_id
-        teams = [team for team in self.repository.list_teams() if team.org_id in {None, org_id}]
-        volunteers = [volunteer for volunteer in self.repository.list_volunteers() if volunteer.org_id in {None, org_id}]
-        resources = [resource for resource in self.repository.list_resources() if resource.org_id in {None, org_id}]
+        teams = [team for team in self.repository.list_teams() if team.org_id == org_id]
+        volunteers = [volunteer for volunteer in self.repository.list_volunteers() if volunteer.org_id == org_id]
+        resources = [resource for resource in self.repository.list_resources() if resource.org_id == org_id]
         recommendations, reason = self.matcher.recommend(case, teams, volunteers, resources)
         return {"recommendations": recommendations, "unassigned_reason": reason}
 
@@ -245,12 +328,26 @@ class AgentGraphService:
         actor = state["actor"]
         org_id = actor.active_org_id or "unassigned"
         if state.get("questions"):
+            case = state.get("case")
             run = GraphRun(
                 run_id=f"run-{uuid.uuid4().hex[:10]}",
                 org_id=org_id,
                 graph_name="dispatch_assignment_graph",
                 status=GraphRunStatus.WAITING_FOR_USER,
                 created_by=actor.uid,
+                drafts=[
+                    RecordDraft(
+                        draft_id=f"draft-{uuid.uuid4().hex[:10]}",
+                        draft_type=DraftRecordType.DISPATCH,
+                        title=f"Blocked dispatch plan for {case.case_id if case else 'incident'}",
+                        payload={
+                            "case_id": case.case_id if case else None,
+                            "blocked_reason": "missing_or_ambiguous_location",
+                        },
+                        confidence=0.2,
+                        warnings=[question.question for question in state["questions"]],
+                    )
+                ],
                 user_questions=state["questions"],
                 needs_user_input=True,
                 next_action="pause",
@@ -288,10 +385,18 @@ class AgentGraphService:
         self._require_run_org(run, actor)
         for draft in run.drafts:
             if draft_id is None or draft.draft_id == draft_id:
+                draft.frozen = True
+                if draft.draft_type == DraftRecordType.INCIDENT:
+                    self._reevaluate_incident_draft(draft, prompt)
+                elif draft.draft_type == DraftRecordType.TEAM:
+                    self._reevaluate_team_draft(draft, prompt)
+                elif draft.draft_type == DraftRecordType.RESOURCE:
+                    self._reevaluate_resource_draft(draft, prompt)
+                else:
+                    draft.payload["operator_prompt"] = prompt
+                    draft.warnings = [*draft.warnings, f"Reevaluated with operator prompt: {prompt}"]
+                    draft.confidence = min(1.0, draft.confidence + 0.03)
                 draft.frozen = False
-                draft.payload["operator_prompt"] = prompt
-                draft.warnings = [*draft.warnings, f"Reevaluated with operator prompt: {prompt}"]
-                draft.confidence = min(1.0, draft.confidence + 0.05)
         run.status = GraphRunStatus.WAITING_FOR_CONFIRMATION
         run.next_action = "confirm_or_edit"
         return self.repository.save_graph_run(run)
@@ -313,10 +418,26 @@ class AgentGraphService:
                 continue
             if draft.draft_type == DraftRecordType.INCIDENT:
                 case = self.repository.create_case(draft.payload.get("raw_input", draft.title), "GRAPH1_CONFIRM", actor)
-                extraction = self.extractor.extract(draft.payload.get("raw_input", draft.title))
-                case = self.repository.save_extraction(case.case_id, extraction, CaseStatus.EXTRACTED)
-                rationale = self.scorer.score(extraction)
-                case = self.repository.save_scoring(case.case_id, rationale.final_score, rationale, rationale.final_urgency)
+                extraction = IncidentExtraction.model_validate(
+                    draft.payload.get("extracted") or self.extractor.extract(draft.payload.get("raw_input", draft.title)).model_dump(mode="json")
+                )
+                case_status = CaseStatus.NEEDS_REVIEW if extraction.confidence < 0.4 else CaseStatus.EXTRACTED
+                case = self.repository.save_extraction(case.case_id, extraction, case_status)
+                geo_payload = draft.payload.get("geo")
+                if isinstance(geo_payload, dict):
+                    lat = geo_payload.get("lat")
+                    lng = geo_payload.get("lng")
+                    if isinstance(lat, int | float) and isinstance(lng, int | float):
+                        case = self.repository.update_case_location(
+                            case.case_id,
+                            extraction.location_text,
+                            float(lat),
+                            float(lng),
+                            LocationConfidence.EXACT,
+                        )
+                if extraction.confidence >= 0.4:
+                    rationale = self.scorer.score(extraction)
+                    case = self.repository.save_scoring(case.case_id, rationale.final_score, rationale, rationale.final_urgency)
                 tokens = self.token_service.from_incident(case, extraction)
                 self.repository.save_info_tokens(case.case_id, tokens)
                 self.repository.save_vector_records(
@@ -335,6 +456,16 @@ class AgentGraphService:
                         )
                     ]
                 )
+                self.repository.record_audit_event(
+                    AuditEvent(
+                        audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                        org_id=run.org_id,
+                        actor_uid=actor.uid,
+                        action="GRAPH1_INCIDENT_COMMITTED",
+                        object_ref=case.case_id,
+                        payload={"run_id": run.run_id, "provider_used": draft.payload.get("provider_used")},
+                    )
+                )
                 self.repository.record_event(
                     CaseEvent(
                         event_id=f"evt-{uuid.uuid4().hex[:10]}",
@@ -346,6 +477,88 @@ class AgentGraphService:
                     )
                 )
                 run.committed_record_ids.append(case.case_id)
+            elif draft.draft_type == DraftRecordType.TEAM:
+                team = Team.model_validate(draft.payload["team"])
+                team.org_id = run.org_id
+                self.repository.save_team(team)
+                tokens = self.token_service.from_csv_row(
+                    run.run_id,
+                    self._stringify_values(draft.payload.get("source_row") or draft.payload.get("team") or {}),
+                    InfoTokenType.TEAM_CAPABILITY,
+                    "TEAM",
+                    team.team_id,
+                )
+                for token in tokens:
+                    token.org_id = run.org_id
+                self.repository.save_info_tokens(None, tokens)
+                self.repository.save_vector_records(
+                    [
+                        VectorRecord(
+                            vector_id=f"vec-{uuid.uuid4().hex[:10]}",
+                            org_id=run.org_id,
+                            record_type="TEAM",
+                            record_id=team.team_id,
+                            token_id=tokens[0].token_id if tokens else None,
+                            embedding=self.vector_service.embed(f"{team.display_name} {' '.join(team.capability_tags)} {team.base_label}"),
+                            text=f"{team.display_name}\n{', '.join(team.capability_tags)}\n{team.base_label}",
+                            metadata={"capabilities": team.capability_tags, "availability": team.availability_status.value},
+                            source_refs=[artifact.artifact_id for artifact in run.source_artifacts],
+                            created_by=actor.uid,
+                        )
+                    ]
+                )
+                self.repository.record_audit_event(
+                    AuditEvent(
+                        audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                        org_id=run.org_id,
+                        actor_uid=actor.uid,
+                        action="GRAPH1_TEAM_COMMITTED",
+                        object_ref=team.team_id,
+                        payload={"run_id": run.run_id},
+                    )
+                )
+                run.committed_record_ids.append(team.team_id)
+            elif draft.draft_type == DraftRecordType.RESOURCE:
+                resource = ResourceInventory.model_validate(draft.payload["resource"])
+                resource.org_id = run.org_id
+                self.repository.save_resource(resource)
+                tokens = self.token_service.from_csv_row(
+                    run.run_id,
+                    self._stringify_values(draft.payload.get("source_row") or draft.payload.get("resource") or {}),
+                    InfoTokenType.RESOURCE_CAPABILITY,
+                    "RESOURCE",
+                    resource.resource_id,
+                )
+                for token in tokens:
+                    token.org_id = run.org_id
+                self.repository.save_info_tokens(None, tokens)
+                self.repository.save_vector_records(
+                    [
+                        VectorRecord(
+                            vector_id=f"vec-{uuid.uuid4().hex[:10]}",
+                            org_id=run.org_id,
+                            record_type="RESOURCE",
+                            record_id=resource.resource_id,
+                            token_id=tokens[0].token_id if tokens else None,
+                            embedding=self.vector_service.embed(f"{resource.resource_type} {resource.location_label} {resource.quantity_available}"),
+                            text=f"{resource.resource_type}\n{resource.location_label}\nQuantity {resource.quantity_available}",
+                            metadata={"resource_type": resource.resource_type, "quantity_available": resource.quantity_available},
+                            source_refs=[artifact.artifact_id for artifact in run.source_artifacts],
+                            created_by=actor.uid,
+                        )
+                    ]
+                )
+                self.repository.record_audit_event(
+                    AuditEvent(
+                        audit_id=f"audit-{uuid.uuid4().hex[:10]}",
+                        org_id=run.org_id,
+                        actor_uid=actor.uid,
+                        action="GRAPH1_RESOURCE_COMMITTED",
+                        object_ref=resource.resource_id,
+                        payload={"run_id": run.run_id},
+                    )
+                )
+                run.committed_record_ids.append(resource.resource_id)
         run.status = GraphRunStatus.COMMITTED
         run.next_action = "complete"
         return self.repository.save_graph_run(run)
@@ -365,6 +578,33 @@ class AgentGraphService:
     def resume_graph2(self, run_id: str, answers: dict[str, str], actor: UserContext) -> GraphRun:
         run = self.repository.get_graph_run(run_id)
         self._require_run_org(run, actor)
+        case_id = next(
+            (
+                str(draft.payload.get("case_id"))
+                for draft in run.drafts
+                if draft.draft_type == DraftRecordType.DISPATCH and draft.payload.get("case_id")
+            ),
+            "",
+        )
+        if case_id:
+            location_answer = answers.get("confirm_location") or answers.get("location") or answers.get("location_text")
+            if location_answer:
+                self.repository.update_case_location(
+                    case_id,
+                    location_answer,
+                    None,
+                    None,
+                    LocationConfidence.APPROXIMATE,
+                )
+            case = self.repository.get_case(case_id)
+            rerun = self.run_graph2(GraphRunRequest(linked_case_id=case_id, text=case.raw_input), actor)
+            rerun.run_id = run.run_id
+            rerun.created_at = run.created_at
+            rerun.user_answers.update(answers)
+            rerun.needs_user_input = False
+            rerun.user_questions = []
+            rerun.next_action = "confirm_or_edit" if rerun.status == GraphRunStatus.WAITING_FOR_CONFIRMATION else rerun.next_action
+            return self.repository.save_graph_run(rerun)
         run.user_answers.update(answers)
         run.needs_user_input = False
         run.status = GraphRunStatus.WAITING_FOR_CONFIRMATION
@@ -404,24 +644,23 @@ class AgentGraphService:
         run.next_action = "complete"
         return self.repository.save_graph_run(run)
 
-    def _draft_from_payload(self, payload: GraphRunRequest, markdown: str) -> RecordDraft:
+    def _draft_from_payload(
+        self,
+        payload: GraphRunRequest,
+        markdown: str,
+        parse_warnings: list[str] | None = None,
+    ) -> RecordDraft:
         if payload.target == "teams":
-            return RecordDraft(
-                draft_id=f"draft-{uuid.uuid4().hex[:10]}",
-                draft_type=DraftRecordType.TEAM,
-                title="Team capability draft",
-                payload={"raw_input": markdown, "operator_prompt": payload.operator_prompt},
-                confidence=0.68,
-            )
+            return self._team_draft_from_row({"display_name": "Team capability draft", "notes": markdown}, payload.operator_prompt)
         if payload.target == "resources":
-            return RecordDraft(
-                draft_id=f"draft-{uuid.uuid4().hex[:10]}",
-                draft_type=DraftRecordType.RESOURCE,
-                title="Resource inventory draft",
-                payload={"raw_input": markdown, "operator_prompt": payload.operator_prompt},
-                confidence=0.68,
-            )
-        extraction = self.extractor.extract(markdown)
+            return self._resource_draft_from_row({"resource_type": "UNKNOWN_RESOURCE", "location_label": markdown}, payload.operator_prompt)
+        result = self.extractor.extract_with_metadata(markdown)
+        extraction = result.extraction
+        warnings = [
+            *result.warnings,
+            *(parse_warnings or []),
+            *extraction.data_quality.needs_followup_questions,
+        ]
         return RecordDraft(
             draft_id=f"draft-{uuid.uuid4().hex[:10]}",
             draft_type=DraftRecordType.INCIDENT,
@@ -431,10 +670,301 @@ class AgentGraphService:
                 "extracted": extraction.model_dump(mode="json"),
                 "location_confidence": "UNKNOWN" if extraction.data_quality.missing_location else "APPROXIMATE",
                 "operator_prompt": payload.operator_prompt,
+                "provider_used": result.provider_used,
+                "provider_fallbacks": result.provider_fallbacks,
+                "parse_warnings": parse_warnings or [],
+                "schema_validated": result.schema_validated,
             },
             confidence=extraction.confidence,
-            warnings=extraction.data_quality.needs_followup_questions,
+            warnings=list(dict.fromkeys(warnings)),
         )
+
+    def _drafts_from_csv_text(
+        self,
+        text: str,
+        target: str,
+        operator_prompt: str | None,
+    ) -> tuple[list[RecordDraft], list[str]]:
+        warnings: list[str] = []
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames:
+            return [], ["CSV has no headers."]
+
+        normalized_headers = [header.strip() for header in reader.fieldnames if header]
+        if len(normalized_headers) != len(set(header.lower() for header in normalized_headers)):
+            warnings.append("CSV contains duplicate headers; later values may overwrite earlier values.")
+
+        drafts: list[RecordDraft] = []
+        seen_rows: set[str] = set()
+        for row_index, row in enumerate(reader, start=1):
+            cleaned = {str(key or "").strip(): str(value or "").strip() for key, value in row.items()}
+            row_key = "|".join(cleaned.get(header, "") for header in normalized_headers)
+            if not row_key.strip():
+                continue
+            if row_key in seen_rows:
+                warnings.append(f"Skipped duplicate row {row_index}.")
+                continue
+            seen_rows.add(row_key)
+            try:
+                if target == "teams":
+                    drafts.append(self._team_draft_from_row(cleaned, operator_prompt))
+                elif target == "resources":
+                    drafts.append(self._resource_draft_from_row(cleaned, operator_prompt))
+                else:
+                    drafts.append(self._incident_draft_from_row(cleaned, operator_prompt))
+            except Exception as exc:
+                warnings.append(f"Row {row_index} could not be drafted: {type(exc).__name__}: {exc}")
+        if not drafts:
+            warnings.append("No usable rows were found in the CSV.")
+        return drafts, warnings
+
+    def _incident_draft_from_row(self, row: dict[str, str], operator_prompt: str | None) -> RecordDraft:
+        raw_input = row.get("raw_input") or row.get("description") or row.get("incident") or " | ".join(row.values())
+        if row.get("location_text") and row.get("location_text") not in raw_input:
+            raw_input = f"{raw_input}\nLocation: {row['location_text']}"
+        if row.get("required_capabilities"):
+            raw_input = f"{raw_input}\nRequired capabilities: {row['required_capabilities']}"
+        if row.get("required_resources"):
+            raw_input = f"{raw_input}\nRequired resources: {row['required_resources']}"
+        feature_lines = []
+        for key, label in [
+            ("hazard_type", "Hazard"),
+            ("people_affected", "People affected"),
+            ("priority_feature", "Priority feature"),
+            ("road_access", "Road access"),
+            ("vulnerable_groups", "Vulnerable groups"),
+            ("source_confidence", "Source confidence"),
+            ("map_feature", "Map feature"),
+        ]:
+            if row.get(key):
+                feature_lines.append(f"{label}: {row[key]}")
+        if feature_lines:
+            raw_input = f"{raw_input}\n" + "\n".join(feature_lines)
+        if operator_prompt:
+            raw_input = f"{raw_input}\nOperator instruction: {operator_prompt}"
+        result = self.extractor.extract_with_metadata(self._prune_and_redact(raw_input))
+        extraction = result.extraction
+        if row.get("location_text") and not extraction.location_text:
+            extraction.location_text = row["location_text"]
+            extraction.data_quality.missing_location = False
+        if row.get("category"):
+            normalized_category = row["category"].strip().upper()
+            if normalized_category in {item.value for item in CategoryKind}:
+                extraction.category = CategoryKind(normalized_category)
+        geo = self._geo_from_row(row)
+        location_confidence = (
+            "EXACT"
+            if geo is not None
+            else "UNKNOWN" if extraction.data_quality.missing_location else "APPROXIMATE"
+        )
+        return RecordDraft(
+            draft_id=f"draft-{uuid.uuid4().hex[:10]}",
+            draft_type=DraftRecordType.INCIDENT,
+            title=f"{extraction.category} - {extraction.location_text or 'Location pending'}",
+            payload={
+                "raw_input": raw_input,
+                "source_row": row,
+                "extracted": extraction.model_dump(mode="json"),
+                "geo": geo.model_dump(mode="json") if geo is not None else None,
+                "location_confidence": location_confidence,
+                "operator_prompt": operator_prompt,
+                "provider_used": result.provider_used,
+                "provider_fallbacks": result.provider_fallbacks,
+                "parse_warnings": result.warnings,
+                "schema_validated": result.schema_validated,
+            },
+            confidence=extraction.confidence,
+            warnings=list(dict.fromkeys([*result.warnings, *extraction.data_quality.needs_followup_questions])),
+        )
+
+    def _team_draft_from_row(self, row: dict[str, str], operator_prompt: str | None) -> RecordDraft:
+        team_id = row.get("team_id") or f"TEAM-{uuid.uuid4().hex[:8].upper()}"
+        capabilities = self._split_tags(row.get("capability_tags") or row.get("skills") or row.get("capabilities"))
+        members = self._split_tags(row.get("member_ids"))
+        service_radius = self._parse_float(row.get("service_radius_km"), 30.0)
+        team = Team(
+            team_id=team_id,
+            display_name=row.get("display_name") or row.get("name") or team_id,
+            capability_tags=capabilities or ["GENERAL_RESPONSE"],
+            member_ids=members,
+            service_radius_km=service_radius,
+            base_label=row.get("base_label") or row.get("location") or row.get("current_label") or "Location pending",
+            base_geo=self._geo_from_row(row, "base") or self._geo_from_row(row),
+            current_label=row.get("current_label") or row.get("base_label") or row.get("location"),
+            current_geo=self._geo_from_row(row, "current") or self._geo_from_row(row, "base") or self._geo_from_row(row),
+            availability_status=self._availability(row.get("availability_status") or row.get("status")),
+            reliability_score=self._parse_float(row.get("reliability_score"), 0.8),
+            notes=[operator_prompt] if operator_prompt else [],
+        )
+        return RecordDraft(
+            draft_id=f"draft-{uuid.uuid4().hex[:10]}",
+            draft_type=DraftRecordType.TEAM,
+            title=f"{team.display_name} ({', '.join(team.capability_tags[:2])})",
+            payload={
+                "raw_input": " | ".join(value for value in row.values() if value),
+                "source_row": row,
+                "team": team.model_dump(mode="json"),
+                "operator_prompt": operator_prompt,
+                "provider_used": "CSV Parser",
+                "provider_fallbacks": [],
+                "parse_warnings": [],
+                "schema_validated": True,
+            },
+            confidence=0.78,
+            warnings=[] if team.base_label != "Location pending" else ["Team base location is missing."],
+        )
+
+    def _resource_draft_from_row(self, row: dict[str, str], operator_prompt: str | None) -> RecordDraft:
+        resource_id = row.get("resource_id") or f"RES-{uuid.uuid4().hex[:8].upper()}"
+        resource = ResourceInventory(
+            resource_id=resource_id,
+            owning_team_id=row.get("owning_team_id") or None,
+            resource_type=row.get("resource_type") or row.get("category") or "UNKNOWN_RESOURCE",
+            quantity_available=max(self._parse_float(row.get("quantity_available") or row.get("quantity"), 0.0), 0.0),
+            location_label=row.get("location_label") or row.get("location") or "Location pending",
+            location=self._geo_from_row(row, "location") or self._geo_from_row(row),
+            current_label=row.get("current_label") or row.get("location_label") or row.get("location"),
+            current_geo=self._geo_from_row(row, "current") or self._geo_from_row(row, "location") or self._geo_from_row(row),
+            constraints=self._split_tags(row.get("constraints")),
+            evidence_ids=[],
+        )
+        return RecordDraft(
+            draft_id=f"draft-{uuid.uuid4().hex[:10]}",
+            draft_type=DraftRecordType.RESOURCE,
+            title=f"{resource.resource_type} ({resource.quantity_available:g} available)",
+            payload={
+                "raw_input": " | ".join(value for value in row.values() if value),
+                "source_row": row,
+                "resource": resource.model_dump(mode="json"),
+                "operator_prompt": operator_prompt,
+                "provider_used": "CSV Parser",
+                "provider_fallbacks": [],
+                "parse_warnings": [],
+                "schema_validated": True,
+            },
+            confidence=0.78 if resource.quantity_available > 0 else 0.45,
+            warnings=[] if resource.location_label != "Location pending" else ["Resource location is missing."],
+        )
+
+    def _questions_for_drafts(self, drafts: list[RecordDraft]) -> list[UserQuestion]:
+        questions: list[UserQuestion] = []
+        if any(
+            draft.draft_type == DraftRecordType.INCIDENT
+            and not draft.removed
+            and draft.payload.get("location_confidence") == "UNKNOWN"
+            for draft in drafts
+        ):
+            questions.append(
+                UserQuestion(
+                    question_id="location",
+                    question="One or more incident locations are missing or ambiguous. Add an address or map pin before dispatch.",
+                    field="location_text",
+                )
+            )
+        return questions
+
+    def _reevaluate_incident_draft(self, draft: RecordDraft, prompt: str) -> None:
+        raw_input = draft.payload.get("raw_input", draft.title)
+        reevaluation_input = self._prune_and_redact(f"{raw_input}\nOperator correction: {prompt}")
+        result = self.extractor.extract_with_metadata(reevaluation_input)
+        extraction = result.extraction
+        draft.title = f"{extraction.category} - {extraction.location_text or 'Location pending'}"
+        draft.payload.update(
+            {
+                "raw_input": reevaluation_input,
+                "extracted": extraction.model_dump(mode="json"),
+                "location_confidence": "UNKNOWN" if extraction.data_quality.missing_location else "APPROXIMATE",
+                "operator_prompt": prompt,
+                "provider_used": result.provider_used,
+                "provider_fallbacks": result.provider_fallbacks,
+                "parse_warnings": result.warnings,
+                "schema_validated": result.schema_validated,
+            }
+        )
+        draft.confidence = extraction.confidence
+        draft.warnings = list(
+            dict.fromkeys(
+                [
+                    *result.warnings,
+                    *extraction.data_quality.needs_followup_questions,
+                    f"Reevaluated with operator prompt: {prompt}",
+                ]
+            )
+        )
+
+    def _reevaluate_team_draft(self, draft: RecordDraft, prompt: str) -> None:
+        row = self._stringify_values(draft.payload.get("source_row") or {})
+        notes = str(row.get("notes") or draft.payload.get("raw_input") or "")
+        row["notes"] = self._prune_and_redact(f"{notes}\nOperator correction: {prompt}")
+        updated = self._team_draft_from_row(row, prompt)
+        draft.title = updated.title
+        draft.payload = updated.payload
+        draft.confidence = min(1.0, updated.confidence + 0.03)
+        draft.warnings = [*updated.warnings, f"Reevaluated with operator prompt: {prompt}"]
+
+    def _reevaluate_resource_draft(self, draft: RecordDraft, prompt: str) -> None:
+        row = self._stringify_values(draft.payload.get("source_row") or {})
+        notes = str(row.get("notes") or draft.payload.get("raw_input") or "")
+        row["notes"] = self._prune_and_redact(f"{notes}\nOperator correction: {prompt}")
+        updated = self._resource_draft_from_row(row, prompt)
+        draft.title = updated.title
+        draft.payload = updated.payload
+        draft.confidence = min(1.0, updated.confidence + 0.03)
+        draft.warnings = [*updated.warnings, f"Reevaluated with operator prompt: {prompt}"]
+
+    def _split_tags(self, value: str | None) -> list[str]:
+        if not value:
+            return []
+        return [
+            token.strip().upper().replace(" ", "_")
+            for token in re.split(r"[,;/|]+", value)
+            if token.strip()
+        ]
+
+    def _parse_float(self, value: str | None, default: float) -> float:
+        if value is None or value == "":
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    def _geo_from_row(self, row: dict[str, str], prefix: str = "") -> GeoPoint | None:
+        candidates: list[tuple[str, str]] = []
+        if prefix:
+            candidates.extend(
+                [
+                    (f"{prefix}_lat", f"{prefix}_lng"),
+                    (f"{prefix}_latitude", f"{prefix}_longitude"),
+                ]
+            )
+        else:
+            candidates.extend([("lat", "lng"), ("latitude", "longitude")])
+        for lat_key, lng_key in candidates:
+            lat_raw = row.get(lat_key)
+            lng_raw = row.get(lng_key)
+            if not lat_raw or not lng_raw:
+                continue
+            try:
+                lat = float(lat_raw)
+                lng = float(lng_raw)
+            except ValueError:
+                continue
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                continue
+            return GeoPoint(lat=lat, lng=lng)
+        return None
+
+    def _availability(self, value: str | None) -> AvailabilityStatus:
+        normalized = (value or "AVAILABLE").strip().upper().replace("-", "_")
+        if normalized in AvailabilityStatus.__members__:
+            return AvailabilityStatus[normalized]
+        if normalized in {item.value for item in AvailabilityStatus}:
+            return AvailabilityStatus(normalized)
+        return AvailabilityStatus.AVAILABLE
+
+    def _stringify_values(self, value: dict[str, Any]) -> dict[str, str]:
+        return {str(key): "" if item is None else str(item) for key, item in value.items()}
 
     def _require_run_org(self, run: GraphRun, actor: UserContext) -> None:
         if run.org_id != actor.active_org_id:

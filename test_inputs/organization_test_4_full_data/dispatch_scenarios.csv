@@ -1,0 +1,6 @@
+scenario_id,incident_hint,expected_team,expected_resource,expected_blocker,operator_answer
+SCN-001,Shantinagar rooftop rescue,TEAM-WATER-01,RES-BOAT-01,none,
+SCN-002,Guwahati pregnant woman,TEAM-MED-01,RES-AMB-01,route_pickup_needed,"Meet at Ward 7 pump house junction."
+SCN-003,Rajgir snakebite,TEAM-MED-01,RES-AMB-01,certification_required,"Use ambulance-authorized medic and confirm referral hospital."
+SCN-004,Cuttack tarpaulins,TEAM-SHELTER-01,RES-TARP-01,household_count_needed,"Prioritize 85 verified households tonight."
+SCN-005,Muzaffarpur diarrhoea,TEAM-WASH-01,RES-ORS-01,medical_wash_joint_response,"Send WASH plus medical check volunteer."

@@ -5,12 +5,14 @@ import { uploadFileToStoragePath } from '@/lib/firebase'
 import type {
   AssignmentDecision,
   AuthSessionResponse,
+  AiStatusResponse,
   CaseDetailResponse,
   CaseRecord,
   DashboardSummary,
   EvalRunSummary,
   IngestionJob,
   Recommendation,
+  ResetOrganizationDataResponse,
   ResourceInventory,
   ResourceNeed,
   Team,
@@ -201,6 +203,14 @@ export async function removeOrgMember(orgId: string, membershipId: string, sessi
   )
 }
 
+export async function resetOrganizationData(orgId: string, session: SessionState | null) {
+  return request<ResetOrganizationDataResponse>(
+    `/organizations/${orgId}/reset-data`,
+    { method: 'POST', body: JSON.stringify({ confirmation: 'RESET_ORG_DATA' }) },
+    session,
+  )
+}
+
 export async function runGraph1(
   payload: { source_kind?: string; text: string; target?: string; operator_prompt?: string | null },
   session: SessionState | null,
@@ -209,7 +219,24 @@ export async function runGraph1(
     '/agent/graph1/run',
     { method: 'POST', body: JSON.stringify(payload) },
     session,
-  )
+)
+}
+
+export async function runGraph1File(
+  payload: { kind: string; target: string; file: File; operator_prompt?: string | null },
+  session: SessionState | null,
+  options: { onProgress?: (message: string) => void } = {},
+) {
+  options.onProgress?.('Parsing file into cleaned source chunks...')
+  const form = new FormData()
+  form.append('source_kind', payload.kind)
+  form.append('target', payload.target)
+  if (payload.operator_prompt) {
+    form.append('operator_prompt', payload.operator_prompt)
+  }
+  form.append('file', payload.file)
+  options.onProgress?.('Drafting editable preview with the configured AI provider...')
+  return request<{ run: GraphRun }>('/agent/graph1/run-file', { method: 'POST', body: form }, session)
 }
 
 export async function editGraph1(runId: string, prompt: string, draftId: string | null, session: SessionState | null) {
@@ -244,6 +271,30 @@ export async function getDashboardSummary(session: SessionState | null): Promise
   return request<DashboardSummary>('/dashboard/summary', {}, session)
 }
 
+export async function getAiStatus(session: SessionState | null): Promise<AiStatusResponse> {
+  return request<AiStatusResponse>('/ai/status', {}, session)
+}
+
+export async function downloadGraphRunCsv(runId: string, session: SessionState | null): Promise<void> {
+  const headers = new Headers(buildHeaders(session))
+  const response = await fetch(`${API_BASE_URL}/agent/runs/${runId}/export.csv`, {
+    headers,
+    cache: 'no-store',
+  })
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response))
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `${runId}.csv`
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function listIncidents(session: SessionState | null): Promise<CaseRecord[]> {
   const payload = await request<{ items: CaseRecord[] }>('/incidents', {}, session)
   return payload.items
@@ -255,6 +306,14 @@ export async function listCases(session: SessionState | null): Promise<CaseRecor
 
 export async function getIncident(caseId: string, session: SessionState | null): Promise<CaseDetailResponse> {
   return request<CaseDetailResponse>(`/incidents/${caseId}`, {}, session)
+}
+
+export async function deleteIncident(caseId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/incidents/${caseId}`,
+    { method: 'DELETE' },
+    session,
+  )
 }
 
 export async function getCase(caseId: string, session: SessionState | null): Promise<CaseDetailResponse> {
@@ -356,9 +415,25 @@ export async function listTeams(session: SessionState | null): Promise<Team[]> {
   return payload.items
 }
 
+export async function deleteTeam(teamId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/teams/${teamId}`,
+    { method: 'DELETE' },
+    session,
+  )
+}
+
 export async function listVolunteers(session: SessionState | null): Promise<Volunteer[]> {
   const payload = await request<{ items: Volunteer[] }>('/volunteers', {}, session)
   return payload.items
+}
+
+export async function deleteVolunteer(volunteerId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/volunteers/${volunteerId}`,
+    { method: 'DELETE' },
+    session,
+  )
 }
 
 export async function listResources(session: SessionState | null): Promise<ResourceInventory[]> {
@@ -366,9 +441,25 @@ export async function listResources(session: SessionState | null): Promise<Resou
   return payload.items
 }
 
+export async function deleteResource(resourceId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/resources/${resourceId}`,
+    { method: 'DELETE' },
+    session,
+  )
+}
+
 export async function listDispatches(session: SessionState | null): Promise<AssignmentDecision[]> {
   const payload = await request<{ items: AssignmentDecision[] }>('/dispatches', {}, session)
   return payload.items
+}
+
+export async function deleteDispatch(assignmentId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/dispatches/${assignmentId}`,
+    { method: 'DELETE' },
+    session,
+  )
 }
 
 export async function registerUpload(
@@ -442,6 +533,22 @@ export async function createIngestionJob(
 export async function listIngestionJobs(session: SessionState | null): Promise<IngestionJob[]> {
   const payload = await request<{ items: IngestionJob[] }>('/ingestion-jobs', {}, session)
   return payload.items
+}
+
+export async function deleteIngestionJob(jobId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/ingestion-jobs/${jobId}`,
+    { method: 'DELETE' },
+    session,
+  )
+}
+
+export async function deleteGraphRun(runId: string, session: SessionState | null) {
+  return request<{ status: string; deleted_id: string; deleted_type: string; request_id: string }>(
+    `/agent/runs/${runId}`,
+    { method: 'DELETE' },
+    session,
+  )
 }
 
 export async function getLatestEval(session: SessionState | null): Promise<EvalRunSummary | null> {

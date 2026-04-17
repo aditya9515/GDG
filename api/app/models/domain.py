@@ -601,10 +601,17 @@ class MergeCaseResponse(BaseModel):
     request_id: str
 
 
+class DeleteResponse(BaseModel):
+    status: str = "DELETED"
+    deleted_id: str
+    deleted_type: str
+    request_id: str
+
+
 class UpdateLocationRequest(BaseModel):
     location_text: str
-    lat: float | None = None
-    lng: float | None = None
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
     location_confidence: LocationConfidence = LocationConfidence.APPROXIMATE
 
 
@@ -705,6 +712,16 @@ class AuthSessionResponse(BaseModel):
     is_host: bool = False
 
 
+class AiStatusResponse(BaseModel):
+    provider_mode: str
+    gemini_enabled: bool
+    gemini_configured: bool
+    ollama_base_url: str
+    ollama_model: str
+    ollama_reachable: bool
+    fallback_order: list[str] = Field(default_factory=list)
+
+
 class CreateOrganizationRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
 
@@ -733,6 +750,17 @@ class MembersResponse(BaseModel):
     organization: Organization
     members: list[OrgMembership]
     invites: list[OrgInvite] = Field(default_factory=list)
+
+
+class ResetOrganizationDataRequest(BaseModel):
+    confirmation: str
+
+
+class ResetOrganizationDataResponse(BaseModel):
+    status: str = "RESET"
+    org_id: str
+    deleted_counts: dict[str, int] = Field(default_factory=dict)
+    request_id: str
 
 
 class GraphRunRequest(BaseModel):

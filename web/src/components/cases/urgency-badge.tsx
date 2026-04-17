@@ -2,16 +2,16 @@ import React from 'react'
 import type { UrgencyKind } from '@/lib/types'
 
 const styles: Record<UrgencyKind, string> = {
-  CRITICAL: 'bg-rose-500/15 text-rose-200 border-rose-500/30',
-  HIGH: 'bg-orange-400/15 text-orange-100 border-orange-300/30',
-  MEDIUM: 'bg-amber-300/15 text-amber-100 border-amber-300/30',
-  LOW: 'bg-emerald-400/12 text-emerald-100 border-emerald-300/25',
-  UNKNOWN: 'bg-slate-200/8 text-slate-200 border-white/10',
+  CRITICAL: 'bg-white text-black border-white shadow-[0_0_24px_rgba(255,255,255,0.12)]',
+  HIGH: 'bg-zinc-200/14 text-zinc-100 border-white/30',
+  MEDIUM: 'bg-zinc-500/12 text-zinc-200 border-white/20',
+  LOW: 'bg-zinc-700/22 text-zinc-300 border-white/14',
+  UNKNOWN: 'bg-white/[0.04] text-zinc-400 border-white/12',
 }
 
 export function UrgencyBadge({ urgency }: { urgency: UrgencyKind }) {
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold tracking-[0.18em] ${styles[urgency]}`}>
+    <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.18em] ${styles[urgency]}`}>
       {urgency}
     </span>
   )

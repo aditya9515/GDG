@@ -1,0 +1,15 @@
+TEST 4 MANUAL REPORTS
+
+1. बाढ़ का पानी Shantinagar bridge के पास तेजी से बढ़ रहा है. 6 लोग balcony पर फंसे हैं. Rescue boat और first aid चाहिए.
+
+2. Duplicate report: same Shantinagar bridge balcony rescue, caller says one child and one elderly person are still waiting.
+
+3. Fire smoke near Surat textile market. People coughing, masks and evacuation help required. Exact lane is Textile Market Lane, Surat.
+
+4. Pregnant woman in labour, Ward 7 Guwahati, ambulance cannot enter because road is waterlogged. Need safe pickup point and maternal care.
+
+5. Warehouse photo says tarpaulin stock looks low, but CSV says 85 sheets available. Operator should verify stock before dispatch.
+
+6. Unknown location: Elderly COPD patient needs oxygen backup. Family says "near the old temple" but no city or ward.
+
+7. Relief camp children have loose motion after using river water. ORS packets and chlorine tablets needed in Muzaffarpur Ward 3.

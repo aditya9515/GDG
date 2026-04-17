@@ -7,20 +7,15 @@ import { UrgencyBadge } from '@/components/cases/urgency-badge'
 import { StatCard } from '@/components/dashboard/stat-card'
 import { TacticalMap } from '@/components/maps/tactical-map'
 import { useAuth } from '@/components/providers/auth-provider'
+import { useCaseManager } from '@/hooks/use-case-manager'
 import {
-  createIncident,
-  createIngestionJob,
-  extractIncident,
   getDashboardSummary,
-  getDispatchOptions,
   listDispatches,
   listIngestionJobs,
   listIncidents,
   listResources,
   listTeams,
-  scoreIncident,
 } from '@/lib/api'
-import { csvTextToFile, parseCsvPreview, type CsvPreview } from '@/lib/csv-preview'
 import type { AssignmentDecision, CaseRecord, DashboardSummary, IngestionJob, ResourceInventory, Team } from '@/lib/types'
 
 type LoadState = {
@@ -32,6 +27,8 @@ type LoadState = {
   jobs: IngestionJob[]
 }
 
+const filters = ['ALL', 'CRITICAL', 'HIGH', 'NEEDS_REVIEW'] as const
+
 export function CommandCenterScreen() {
   const { user } = useAuth()
   const [state, setState] = useState<LoadState>({
@@ -42,16 +39,15 @@ export function CommandCenterScreen() {
     dispatches: [],
     jobs: [],
   })
-  const [filter, setFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'NEEDS_REVIEW'>('ALL')
-  const [rawInput, setRawInput] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [filter, setFilter] = useState<(typeof filters)[number]>('ALL')
+  const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [importKind, setImportKind] = useState<'CSV' | 'PDF' | 'IMAGE'>('CSV')
-  const [importTarget, setImportTarget] = useState<'incidents' | 'teams' | 'resources'>('incidents')
-  const [importFile, setImportFile] = useState<File | null>(null)
-  const [importCsvText, setImportCsvText] = useState('')
-  const [importPreview, setImportPreview] = useState<CsvPreview | null>(null)
-  const [importStep, setImportStep] = useState<string | null>(null)
+  const { createCaseFromInput, creatingCase, removeCase, removingCaseId } = useCaseManager({
+    session: user,
+    onMessage: setMessage,
+    onRefresh: refresh,
+    onDeleted: removeCaseFromState,
+  })
 
   useEffect(() => {
     if (!user) {
@@ -61,32 +57,33 @@ export function CommandCenterScreen() {
   }, [user])
 
   const filteredIncidents = useMemo(() => {
+    const open = state.incidents.filter((item) => !['CLOSED', 'MERGED'].includes(item.status))
     if (filter === 'ALL') {
-      return state.incidents
+      return open
     }
     if (filter === 'NEEDS_REVIEW') {
-      return state.incidents.filter((item) => item.status === 'NEEDS_REVIEW')
+      return open.filter((item) => item.status === 'NEEDS_REVIEW' || item.location_confidence === 'UNKNOWN')
     }
-    return state.incidents.filter((item) => item.urgency === filter)
+    return open.filter((item) => item.urgency === filter)
   }, [filter, state.incidents])
 
   const markers = useMemo(
     () => [
-      ...state.incidents.slice(0, 10).map((incident) => ({
+      ...state.incidents.map((incident) => ({
         id: incident.case_id,
         label: incident.case_id,
         subtitle: `${incident.urgency} | ${incident.location_text || 'Location pending'}`,
         tone: 'incident' as const,
         point: incident.geo,
       })),
-      ...state.teams.slice(0, 8).map((team) => ({
+      ...state.teams.map((team) => ({
         id: team.team_id,
         label: team.display_name,
         subtitle: `${team.capability_tags.slice(0, 2).join(', ') || 'General response'}`,
         tone: 'team' as const,
         point: team.current_geo ?? team.base_geo,
       })),
-      ...state.resources.slice(0, 8).map((resource) => ({
+      ...state.resources.map((resource) => ({
         id: resource.resource_id,
         label: resource.resource_type,
         subtitle: `${resource.quantity_available} available`,
@@ -97,391 +94,518 @@ export function CommandCenterScreen() {
     [state.incidents, state.resources, state.teams],
   )
 
+  const mapCoverage = useMemo(() => {
+    const total =
+      Math.max(state.incidents.length, 0) +
+      Math.max(state.teams.length, 0) +
+      Math.max(state.resources.length, 0)
+    const mapped = markers.filter((item) => item.point).length
+    return total > 0 ? Math.round((mapped / total) * 100) : 0
+  }, [markers, state.incidents.length, state.resources.length, state.teams.length])
+
+  const opsSignals = useMemo(() => {
+    const open = state.incidents.filter((item) => !['CLOSED', 'MERGED'].includes(item.status))
+    const critical = open.filter((item) => item.urgency === 'CRITICAL').length
+    const needsReview = open.filter((item) => item.status === 'NEEDS_REVIEW' || item.location_confidence === 'UNKNOWN').length
+    const duplicateRisk = open.filter((item) => item.duplicate_status !== 'NONE').length
+    const unmapped = open.filter((item) => !item.geo).length
+    const availableResources = state.resources.filter((item) => item.quantity_available > 0).length
+    const activeDispatches = state.dispatches.filter((item) => ['CONFIRMED', 'IN_PROGRESS'].includes(item.status)).length
+    const reviewPenalty = open.length > 0 ? Math.round((needsReview / open.length) * 35) : 0
+    const duplicatePenalty = open.length > 0 ? Math.round((duplicateRisk / open.length) * 15) : 0
+    const resourceScore = state.resources.length > 0 ? Math.round((availableResources / state.resources.length) * 20) : 12
+    const readiness = Math.max(0, Math.min(100, Math.round(mapCoverage * 0.45 + resourceScore + 35 - reviewPenalty - duplicatePenalty)))
+
+    return {
+      open: open.length,
+      critical,
+      needsReview,
+      duplicateRisk,
+      unmapped,
+      activeDispatches,
+      availableResources,
+      readiness,
+      dispatchPressure: open.length > 0 ? Math.min(100, Math.round(((critical * 1.7 + activeDispatches) / open.length) * 100)) : 0,
+    }
+  }, [mapCoverage, state.dispatches, state.incidents, state.resources])
+
   async function refresh() {
     if (!user) {
       return
     }
-    const [summary, incidents, teams, resources, dispatches, jobs] = await Promise.all([
-      getDashboardSummary(user),
-      listIncidents(user),
-      listTeams(user),
-      listResources(user),
-      listDispatches(user),
-      listIngestionJobs(user),
-    ])
-    setState({ summary, incidents, teams, resources, dispatches, jobs })
-  }
-
-  async function submitManual() {
-    if (!user || !rawInput.trim()) {
-      return
-    }
-    setBusy(true)
-    setMessage('Geo-anchoring incident and generating dispatch options...')
-    try {
-      const created = await createIncident(rawInput, user)
-      await extractIncident(created.case_id, user)
-      await scoreIncident(created.case_id, user)
-      await getDispatchOptions(created.case_id, user)
-      setRawInput('')
-      setMessage(`Incident ${created.case_id} is ready for location review and dispatch.`)
-      await refresh()
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to triage incident.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function submitImport() {
-    if (!user || !importFile) {
-      return
-    }
-    setBusy(true)
-    setImportStep(`Preparing ${importFile.name}...`)
+    setLoading(true)
     setMessage(null)
     try {
-      const uploadFile =
-        importKind === 'CSV' && importCsvText.trim()
-          ? csvTextToFile(importCsvText, importFile.name.endsWith('.csv') ? importFile.name : `${importFile.name}.csv`)
-          : importFile
-      await createIngestionJob(
-        {
-          kind: importKind,
-          target: importTarget,
-          file: uploadFile,
-        },
-        user,
-        {
-          onProgress: setImportStep,
-        },
-      )
-      setImportFile(null)
-      setImportCsvText('')
-      setImportPreview(null)
-      setMessage(`${importFile.name} imported into ReliefOps.`)
-      await refresh()
+      const [summary, incidents, teams, resources, dispatches, jobs] = await Promise.all([
+        getDashboardSummary(user),
+        listIncidents(user),
+        listTeams(user),
+        listResources(user),
+        listDispatches(user),
+        listIngestionJobs(user),
+      ])
+      setState({ summary, incidents, teams, resources, dispatches, jobs })
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Import failed.')
+      setMessage(error instanceof Error ? error.message : 'Could not refresh command center.')
     } finally {
-      setImportStep(null)
-      setBusy(false)
+      setLoading(false)
     }
   }
 
-  async function handleImportFile(nextFile: File | null) {
-    setImportFile(nextFile)
-    setImportPreview(null)
-    setImportCsvText('')
-    setMessage(null)
-    setImportStep(null)
-    if (!nextFile || importKind !== 'CSV') {
-      return
-    }
-    try {
-      const text = await nextFile.text()
-      setImportCsvText(text)
-      setImportPreview(parseCsvPreview(text))
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not read CSV preview.')
-    }
-  }
-
-  function updateCsvText(value: string) {
-    setImportCsvText(value)
-    setImportPreview(parseCsvPreview(value))
+  function removeCaseFromState(caseId: string) {
+    setState((current) => ({
+      ...current,
+      incidents: current.incidents.filter((incident) => incident.case_id !== caseId),
+      dispatches: current.dispatches.filter((dispatch) => dispatch.case_id !== caseId),
+      summary: (() => {
+        const removed = current.incidents.find((incident) => incident.case_id === caseId)
+        const wasOpen = removed ? !['CLOSED', 'MERGED'].includes(removed.status) : false
+        const wasCritical = removed?.urgency === 'CRITICAL'
+        const wasMapped = Boolean(removed?.geo)
+        return current.summary
+          ? {
+              ...current.summary,
+              total_cases: Math.max(current.summary.total_cases - 1, 0),
+              open_cases: wasOpen ? Math.max(current.summary.open_cases - 1, 0) : current.summary.open_cases,
+              critical_cases: wasCritical ? Math.max(current.summary.critical_cases - 1, 0) : current.summary.critical_cases,
+              mapped_cases: wasMapped ? Math.max(current.summary.mapped_cases - 1, 0) : current.summary.mapped_cases,
+            }
+          : current.summary
+      })(),
+    }))
   }
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-3 border-b border-white/8 pb-5 xl:flex-row xl:items-end xl:justify-between">
+    <div className="space-y-2">
+      <header className="motion-rise flex flex-col gap-5 border border-white/14 bg-black/35 p-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Maps-first command center</p>
-          <h1 className="mt-2 text-3xl font-semibold">Locate, rank, and dispatch faster</h1>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
-            Turn scattered reports into geo-anchored incidents, match the nearest capable team and resources, and keep every move auditable.
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-white shadow-[0_0_18px_rgba(255,255,255,0.7)]" />
+            Live command surface
+          </div>
+          <h1 className="mt-4 text-balance text-4xl font-semibold tracking-[-0.04em] text-white md:text-5xl">
+            Relief allocation, mapped cleanly.
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+            A focused operations board for incidents, teams, assets, routes, and dispatch state. Intake and imports live in their own workflow so this page stays calm under pressure.
           </p>
+          {message ? <p className="mt-3 text-sm text-rose-200">{message}</p> : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(['ALL', 'CRITICAL', 'HIGH', 'NEEDS_REVIEW'] as const).map((item) => (
+        <div className="flex flex-wrap items-center gap-2">
+          {filters.map((item) => (
             <button
               key={item}
-              className={`rounded-full px-4 py-2 text-xs font-semibold tracking-[0.18em] ${
-                filter === item ? 'bg-amber-300/12 text-amber-100' : 'bg-white/5 text-slate-300'
+              className={`rounded-full px-4 py-2 text-xs font-semibold tracking-[0.16em] transition ${
+                filter === item
+                  ? 'bg-white !text-black shadow-[0_12px_28px_rgba(255,255,255,0.1)]'
+                  : 'border border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/20 hover:text-white'
               }`}
               onClick={() => setFilter(item)}
             >
               {item}
             </button>
           ))}
+          <button
+            className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-semibold tracking-[0.16em] text-slate-300 transition hover:border-white/25 hover:text-white disabled:opacity-50"
+            disabled={loading}
+            onClick={() => void refresh()}
+          >
+            {loading ? 'SYNCING' : 'REFRESH'}
+          </button>
+          {user?.is_host ? (
+            <Link
+              className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-semibold tracking-[0.16em] text-slate-300 transition hover:border-white/25 hover:text-white"
+              href="/organization#danger-zone"
+            >
+              RESET DATA
+            </Link>
+          ) : null}
         </div>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <section className="grid gap-2 xl:grid-cols-[25rem_minmax(0,1fr)]">
+        <CaseRail
+          incidents={state.incidents}
+          onCreate={createCaseFromInput}
+          onRemove={removeCase}
+          creating={creatingCase}
+          removingCaseId={removingCaseId}
+        />
+
+        <div className="motion-rise motion-delay-1">
+          <TacticalMap
+            title="Operational map"
+            markers={markers}
+            emptyMessage="Add a case with coordinates, or import teams/resources with map locations, to preview every operational point here."
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
         <StatCard label="Open Incidents" value={state.summary?.open_cases ?? '...'} />
-        <StatCard label="Critical Queue" value={state.summary?.critical_cases ?? '...'} tone="alert" />
+        <StatCard label="Critical" value={state.summary?.critical_cases ?? '...'} tone="alert" />
         <StatCard label="Mapped Incidents" value={state.summary?.mapped_cases ?? '...'} />
-        <StatCard label="Mapped Teams" value={state.summary?.mapped_teams ?? '...'} />
-        <StatCard label="Mapped Resources" value={state.summary?.mapped_resources ?? '...'} />
+        <StatCard label="Teams" value={state.summary?.mapped_teams ?? '...'} />
+        <StatCard label="Resources" value={state.summary?.mapped_resources ?? '...'} />
         <StatCard label="Active Dispatches" value={state.summary?.active_dispatches ?? '...'} />
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <TacticalMap title="Live operational surface" markers={markers} />
-
-        <div className="space-y-6">
-          <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Manual intake</h2>
-                <p className="mt-1 text-sm text-slate-400">Paste a field report and run the full triage pipeline.</p>
-              </div>
-              <button
-                className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-white/20 hover:text-white"
-                onClick={() => void refresh()}
-              >
-                Refresh
-              </button>
-            </div>
-            <textarea
-              className="mt-4 min-h-40 w-full rounded-[1.25rem] border border-white/10 bg-slate-950/70 px-4 py-4 text-sm text-stone-100 outline-none placeholder:text-slate-500"
-              placeholder="Flood water rising fast near Shantinagar bridge. 4 people on rooftop incl 1 child. Need rescue boat ASAP."
-              value={rawInput}
-              onChange={(event) => setRawInput(event.target.value)}
-            />
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                className="rounded-2xl bg-amber-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy || !rawInput.trim()}
-                onClick={() => void submitManual()}
-              >
-                {busy ? 'Running...' : 'Create incident'}
-              </button>
-              <p className="text-sm text-slate-400">{message ?? 'Create incident -> extract -> score -> dispatch options.'}</p>
-            </div>
+      <section className="grid gap-2 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="surface-card motion-rise motion-delay-1 overflow-hidden p-5">
+          <div className="absolute right-6 top-6 h-28 w-28 rounded-full border border-white/10">
+              <span className="orbit-glow absolute left-1/2 top-1/2 h-2 w-2 rounded-full bg-white shadow-[0_0_22px_rgba(255,255,255,0.8)]" />
           </div>
+          <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Operational readiness</p>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
+                Blends map coverage, review debt, duplicate risk, dispatch load, and available stock into one judge-friendly signal.
+              </p>
+            </div>
+            <ReadinessDial value={opsSignals.readiness} />
+          </div>
+          <div className="relative mt-6 grid gap-3 md:grid-cols-4">
+            <SignalCard label="Location debt" value={opsSignals.unmapped} detail="incidents unmapped" tone={opsSignals.unmapped > 0 ? 'warn' : 'good'} />
+            <SignalCard label="Review queue" value={opsSignals.needsReview} detail="needs operator check" tone={opsSignals.needsReview > 0 ? 'warn' : 'good'} />
+            <SignalCard label="Duplicate risk" value={opsSignals.duplicateRisk} detail="possible merges" tone={opsSignals.duplicateRisk > 0 ? 'warn' : 'good'} />
+            <SignalCard label="Stock online" value={opsSignals.availableResources} detail="available assets" tone="info" />
+          </div>
+        </div>
 
-          <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
-            <h2 className="text-lg font-semibold">Quick imports</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              This runs directly from the command center. CSV files show a preview here first; the Imports page is just the full history/review workspace.
+        <div className="surface-card motion-rise motion-delay-2 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Workflow state</p>
+              <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">From evidence to dispatch</h2>
+            </div>
+            <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              {opsSignals.dispatchPressure}% pressure
+            </span>
+          </div>
+          <div className="mask-fade mt-6 grid grid-cols-4 gap-2">
+            <PipelineStep label="Import" active={state.jobs.length > 0} />
+            <PipelineStep label="Triage" active={opsSignals.open > 0} />
+            <PipelineStep label="Assign" active={opsSignals.activeDispatches > 0} />
+            <PipelineStep label="Resolve" active={state.dispatches.some((item) => item.status === 'COMPLETED')} />
+          </div>
+          <div className="mt-5 rounded-2xl border border-white/[0.07] bg-black/20 p-4">
+            <p className="text-sm leading-6 text-slate-400">
+              {opsSignals.critical > 0
+                ? `${opsSignals.critical} critical incident${opsSignals.critical === 1 ? '' : 's'} should stay at the top of dispatch review.`
+                : 'No critical incident is currently active. Keep improving map confidence and duplicate hygiene.'}
             </p>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <select
-                className="rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3 text-sm text-stone-100"
-                value={importKind}
-                onChange={(event) => {
-                  setImportKind(event.target.value as 'CSV' | 'PDF' | 'IMAGE')
-                  setImportFile(null)
-                  setImportCsvText('')
-                  setImportPreview(null)
-                }}
-              >
-                <option value="CSV">CSV</option>
-                <option value="PDF">PDF</option>
-                <option value="IMAGE">IMAGE</option>
-              </select>
-              <select
-                className="rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3 text-sm text-stone-100"
-                value={importTarget}
-                onChange={(event) => setImportTarget(event.target.value as 'incidents' | 'teams' | 'resources')}
-              >
-                <option value="incidents">Incidents</option>
-                <option value="teams">Teams</option>
-                <option value="resources">Resources</option>
-              </select>
-              <label className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-white/12 bg-white/3 px-3 py-3 text-sm text-slate-300">
-                <input
-                  className="hidden"
-                  type="file"
-                  accept={importKind === 'CSV' ? '.csv' : importKind === 'PDF' ? '.pdf' : 'image/*'}
-                  onChange={(event) => void handleImportFile(event.target.files?.[0] ?? null)}
-                />
-                {importFile ? importFile.name : 'Choose file'}
-              </label>
-            </div>
-            {importPreview ? (
-              <div className="mt-4 rounded-2xl border border-white/8 bg-slate-950/55 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-stone-100">CSV preview before commit</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {importPreview.rowCount} rows detected. Edit the CSV text if needed, then press Start import.
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-400">
-                    {importTarget}
-                  </span>
-                </div>
-                {importPreview.warnings.length > 0 ? (
-                  <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs text-amber-100">
-                    {importPreview.warnings.join(' ')}
-                  </div>
-                ) : null}
-                <div className="mt-3 max-h-44 overflow-auto rounded-xl border border-white/8">
-                  <table className="w-full min-w-[560px] text-left text-xs">
-                    <thead className="bg-white/5 text-slate-400">
-                      <tr>
-                        {importPreview.headers.map((header) => (
-                          <th key={header} className="px-3 py-2 font-medium">
-                            {header}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {importPreview.rows.map((row, index) => (
-                        <tr key={`${index}-${JSON.stringify(row)}`} className="border-t border-white/8 text-slate-300">
-                          {importPreview.headers.map((header) => (
-                            <td key={header} className="max-w-56 truncate px-3 py-2">
-                              {row[header]}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-sm text-amber-100">Edit CSV text before import</summary>
-                  <textarea
-                    className="mt-3 min-h-36 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 font-mono text-xs text-stone-100"
-                    value={importCsvText}
-                    onChange={(event) => updateCsvText(event.target.value)}
-                  />
-                </details>
-              </div>
-            ) : null}
-            <div className="mt-4 flex items-center gap-3">
-              <button
-                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy || !importFile}
-                onClick={() => void submitImport()}
-              >
-                {busy ? 'Working...' : importKind === 'CSV' ? 'Start import after preview' : 'Start import'}
-              </button>
-              <Link className="text-sm text-amber-100 transition hover:text-amber-50" href="/imports">
-                Open full import workspace
-              </Link>
-            </div>
-            {importStep ? <p className="mt-3 text-sm text-slate-300">{importStep}</p> : null}
-            {message ? <p className="mt-3 text-sm text-slate-300">{message}</p> : null}
           </div>
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
+      <section className="grid gap-2 xl:grid-cols-[1fr_0.85fr]">
+        <div className="motion-rise motion-delay-2 grid gap-4">
+          <div className="surface-card p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Priority queue</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-white">{filteredIncidents.length} active items</h2>
+              </div>
+              <Link className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/25 hover:text-white" href="/imports">
+                Open imports
+              </Link>
+            </div>
+            <div className="mt-4 grid gap-2">
+              {filteredIncidents.slice(0, 7).map((incident) => (
+                <Link
+                  key={incident.case_id}
+                  href={`/incidents/${incident.case_id}`}
+                  className="group rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 transition duration-300 hover:-translate-y-0.5 hover:border-white/15 hover:bg-white/[0.045]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <UrgencyBadge urgency={incident.urgency} />
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                          {incident.location_confidence}
+                        </span>
+                      </div>
+                      <p className="mt-2 font-medium text-slate-100">{incident.case_id}</p>
+                      <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500 transition group-hover:text-slate-400">
+                        {incident.raw_input}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-600">Score</p>
+                      <p className="mt-1 text-2xl font-semibold text-white">{incident.priority_score ?? '--'}</p>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+              {filteredIncidents.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 p-5 text-sm text-slate-500">
+                  No incidents match this filter.
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="surface-card p-5">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Map coverage</p>
+            <div className="mt-4 flex items-end justify-between">
+              <p className="text-5xl font-semibold tracking-[-0.06em] text-white">{mapCoverage}%</p>
+              <p className="max-w-44 text-right text-sm leading-5 text-slate-500">
+                Location confidence improves dispatch quality and route ranking.
+              </p>
+            </div>
+            <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.06]">
+              <div
+                className="h-full rounded-full bg-white transition-all duration-700"
+                style={{ width: `${mapCoverage}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-2 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="surface-card motion-rise motion-delay-3 p-5">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Active dispatches</h2>
-              <p className="mt-1 text-sm text-slate-400">Confirmed and in-progress operations.</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Dispatches</p>
+              <h2 className="mt-2 text-xl font-semibold text-white">Active operations</h2>
             </div>
-            <Link className="text-sm text-amber-100 transition hover:text-amber-50" href="/dispatch">
-              Full dispatch board
+            <Link className="text-sm text-slate-300 transition hover:text-white" href="/dispatch">
+              View board
             </Link>
           </div>
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 grid gap-2">
             {state.dispatches.slice(0, 6).map((dispatch) => (
-              <div key={dispatch.assignment_id} className="rounded-[1.25rem] border border-white/8 bg-white/3 p-4">
+              <div key={dispatch.assignment_id} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="font-semibold text-stone-100">{dispatch.assignment_id}</p>
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                  <p className="font-medium text-stone-100">{dispatch.assignment_id}</p>
+                  <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-500">
                     {dispatch.status}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-slate-400">
+                <p className="mt-2 text-sm text-slate-500">
                   {dispatch.team_id ?? 'Unassigned team'} | ETA {dispatch.eta_minutes ?? 'Unknown'} min
                 </p>
               </div>
             ))}
             {state.dispatches.length === 0 ? (
-              <p className="rounded-[1.25rem] border border-white/8 bg-white/3 p-4 text-sm text-slate-500">
-                Dispatch confirmations will appear here once incidents are assigned.
+              <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-slate-500">
+                Dispatch confirmations will appear here once assignments are approved.
               </p>
             ) : null}
           </div>
         </div>
 
-        <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
+        <div className="surface-card motion-rise motion-delay-4 p-5">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Ranked incident queue</h2>
-              <p className="mt-1 text-sm text-slate-400">Urgency, map confidence, and duplicate risk in one queue.</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Imports</p>
+              <h2 className="mt-2 text-xl font-semibold text-white">Recent processing</h2>
             </div>
-            <span className="rounded-full border border-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-              {filteredIncidents.length} incidents
-            </span>
+            <Link className="text-sm text-slate-300 transition hover:text-white" href="/imports">
+              Open imports
+            </Link>
           </div>
-          <div className="mt-4 grid gap-3">
-            {filteredIncidents.slice(0, 14).map((incident) => (
-              <Link
-                key={incident.case_id}
-                href={`/incidents/${incident.case_id}`}
-                className="rounded-[1.25rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4 transition hover:border-amber-300/25 hover:bg-white/6"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <UrgencyBadge urgency={incident.urgency} />
-                      <span className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                        {incident.location_confidence}
-                      </span>
-                      {incident.duplicate_status !== 'NONE' ? (
-                        <span className="rounded-full border border-rose-400/20 bg-rose-500/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-rose-200">
-                          {incident.duplicate_status}
-                        </span>
-                      ) : null}
-                    </div>
-                    <h3 className="font-semibold text-stone-100">{incident.case_id}</h3>
-                    <p className="line-clamp-2 text-sm leading-6 text-slate-400">{incident.raw_input}</p>
-                  </div>
-                  <div className="min-w-36 text-right">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Priority</p>
-                    <p className="mt-2 text-2xl font-semibold text-stone-100">{incident.priority_score ?? '--'}</p>
-                    <p className="mt-1 text-xs text-slate-500">{incident.location_text || 'Location pending'}</p>
-                  </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            {state.jobs.slice(0, 6).map((job) => (
+              <div key={job.job_id} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="truncate font-medium text-stone-100">{job.filename}</p>
+                  <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                    {job.status}
+                  </span>
                 </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-[1.5rem] border border-white/8 bg-slate-950/45 p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Recent ingestion jobs</h2>
-            <p className="mt-1 text-sm text-slate-400">Track what was imported, processed, and converted into operational records.</p>
-          </div>
-          <Link className="text-sm text-amber-100 transition hover:text-amber-50" href="/imports">
-            View all imports
-          </Link>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {state.jobs.slice(0, 6).map((job) => (
-            <div key={job.job_id} className="rounded-[1.25rem] border border-white/8 bg-white/3 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-semibold text-stone-100">{job.filename}</p>
-                <span className="rounded-full border border-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                  {job.status}
-                </span>
+                <p className="mt-2 text-sm text-slate-500">
+                  {job.kind} {'->'} {job.target}
+                </p>
               </div>
-              <p className="mt-2 text-sm text-slate-400">
-                {job.kind} {'->'} {job.target}
-              </p>
-              <p className="mt-2 text-xs text-slate-500">
-                {job.success_count} success | {job.warning_count} warnings
-              </p>
-            </div>
-          ))}
-          {state.jobs.length === 0 ? (
-            <div className="rounded-[1.25rem] border border-white/8 bg-white/3 p-4 text-sm text-slate-500">
-              Imports from CSV, PDF, and images will appear here once you start processing files.
-            </div>
-          ) : null}
+            ))}
+            {state.jobs.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-slate-500">
+                Import previews and committed jobs will appear here.
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
+    </div>
+  )
+}
+
+function CaseRail({
+  incidents,
+  onCreate,
+  onRemove,
+  creating,
+  removingCaseId,
+}: {
+  incidents: CaseRecord[]
+  onCreate: (payload: { rawInput: string; locationText: string; lat: string; lng: string }) => Promise<boolean>
+  onRemove: (caseId: string) => Promise<boolean>
+  creating: boolean
+  removingCaseId: string | null
+}) {
+  const [rawInput, setRawInput] = useState('')
+  const [locationText, setLocationText] = useState('')
+  const [lat, setLat] = useState('')
+  const [lng, setLng] = useState('')
+
+  async function submit() {
+    const created = await onCreate({ rawInput, locationText, lat, lng })
+    if (created) {
+      setRawInput('')
+      setLocationText('')
+      setLat('')
+      setLng('')
+    }
+  }
+
+  return (
+    <aside className="surface-card motion-rise motion-delay-1 max-h-[48rem] overflow-hidden p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Cases</p>
+          <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">Add, map, remove</h2>
+        </div>
+        <span className="border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+          {incidents.length}
+        </span>
+      </div>
+
+      <div className="mt-4 border border-white/[0.08] bg-white/[0.025] p-3">
+        <textarea
+          className="min-h-24 w-full resize-none border border-white/10 bg-black/40 px-3 py-2 text-sm leading-5 text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+          placeholder="Paste a field report. Example: Flood water rising near Shantinagar bridge, 4 people trapped, rescue boat needed."
+          value={rawInput}
+          onChange={(event) => setRawInput(event.target.value)}
+        />
+        <input
+          className="mt-2 w-full border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+          placeholder="Location label or address"
+          value={locationText}
+          onChange={(event) => setLocationText(event.target.value)}
+        />
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <input
+            className="border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+            placeholder="Latitude"
+            value={lat}
+            onChange={(event) => setLat(event.target.value)}
+          />
+          <input
+            className="border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-white/25"
+            placeholder="Longitude"
+            value={lng}
+            onChange={(event) => setLng(event.target.value)}
+          />
+        </div>
+        <button
+          className="mt-3 w-full border border-white/15 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={creating || rawInput.trim().length < 3}
+          onClick={() => void submit()}
+        >
+          {creating ? 'Creating case...' : 'Create case'}
+        </button>
+        <p className="mt-2 text-[11px] leading-5 text-slate-500">
+          Coordinates are optional, but adding them makes the case appear on the map immediately.
+        </p>
+      </div>
+
+      <div className="mt-4 grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
+        {incidents.map((incident) => (
+          <div key={incident.case_id} className="border border-white/[0.08] bg-white/[0.025] p-3 transition hover:border-white/15 hover:bg-white/[0.045]">
+            <div className="flex items-start justify-between gap-3">
+              <Link href={`/incidents/${incident.case_id}`} className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <UrgencyBadge urgency={incident.urgency} />
+                  <span className="border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                    {incident.location_confidence}
+                  </span>
+                </div>
+                <p className="mt-2 truncate text-sm font-semibold text-white">{incident.case_id}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{incident.raw_input}</p>
+                <p className="mt-2 truncate text-[11px] text-slate-600">{incident.location_text || 'No location yet'}</p>
+              </Link>
+              <button
+                aria-label={`Remove ${incident.case_id}`}
+                className="shrink-0 border border-white/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-white hover:text-black"
+                disabled={removingCaseId === incident.case_id}
+                onClick={() => void onRemove(incident.case_id)}
+              >
+                {removingCaseId === incident.case_id ? 'Removing' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        ))}
+        {incidents.length === 0 ? (
+          <div className="border border-dashed border-white/10 p-4 text-sm text-slate-500">
+            No cases match the current filter.
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  )
+}
+
+function ReadinessDial({ value }: { value: number }) {
+  const safeValue = Math.max(0, Math.min(100, value))
+  return (
+    <div className="relative grid h-32 w-32 shrink-0 place-items-center rounded-full border border-white/10 bg-black/20">
+      <div
+        className="absolute inset-2 rounded-full"
+        style={{
+          background: `conic-gradient(#ffffff ${safeValue * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
+        }}
+      />
+      <div className="absolute inset-5 rounded-full bg-[#070b12]" />
+      <div className="relative text-center">
+        <p className="text-3xl font-semibold tracking-[-0.06em] text-white">{safeValue}</p>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Ready</p>
+      </div>
+    </div>
+  )
+}
+
+function SignalCard({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string
+  value: number
+  detail: string
+  tone: 'good' | 'warn' | 'info'
+}) {
+  const toneClass =
+    tone === 'good'
+      ? 'text-white'
+      : tone === 'warn'
+        ? 'text-zinc-300'
+        : 'text-zinc-100'
+  return (
+    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 transition hover:-translate-y-0.5 hover:bg-white/[0.04]">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{label}</p>
+        <span className={`signal-dot h-1.5 w-1.5 rounded-full ${toneClass} bg-current`} />
+      </div>
+      <p className="mt-3 text-3xl font-semibold tracking-[-0.06em] text-white">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{detail}</p>
+    </div>
+  )
+}
+
+function PipelineStep({ label, active }: { label: string; active: boolean }) {
+  return (
+    <div className="relative">
+      <div
+        className={`h-2 rounded-full transition-all duration-700 ${
+          active ? 'bg-white shadow-[0_0_24px_rgba(255,255,255,0.2)]' : 'bg-white/[0.08]'
+        }`}
+      />
+      <p className={`mt-2 text-center text-[10px] uppercase tracking-[0.18em] ${active ? 'text-slate-200' : 'text-slate-600'}`}>
+        {label}
+      </p>
     </div>
   )
 }

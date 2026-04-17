@@ -9,14 +9,14 @@ export function StatCard({
 }) {
   return (
     <div
-      className={`rounded-[1.5rem] border p-4 ${
+      className={`surface-card motion-rise p-4 transition duration-300 hover:-translate-y-0.5 ${
         tone === 'alert'
-          ? 'border-rose-400/20 bg-rose-500/8'
-          : 'border-white/8 bg-slate-950/45'
+          ? 'border-white/28 bg-white/[0.06]'
+          : ''
       }`}
     >
       <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-semibold text-stone-100">{value}</p>
+      <p className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-white">{value}</p>
     </div>
   )
 }
