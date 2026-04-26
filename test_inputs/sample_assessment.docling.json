@@ -1,0 +1,28 @@
+{
+  "pages": [
+    {
+      "page_no": 1,
+      "blocks": [
+        {
+          "type": "heading",
+          "text": "Rapid Assessment Report"
+        },
+        {
+          "type": "location",
+          "text": "Shantinagar bridge, Patna"
+        },
+        {
+          "type": "list",
+          "items": [
+            "4 people trapped on rooftop",
+            "1 child present",
+            "Rescue boat required",
+            "First aid support requested"
+          ]
+        }
+      ]
+    }
+  ],
+  "ocr_confidence": 0.91,
+  "detected_languages": ["en"]
+}

@@ -1,0 +1,9 @@
+resource_id,category,subtype,resource_type,quantity,unit,status,owner_team_id,warehouse_address,lat,lng,expiry_or_maintenance,constraints,proof_document
+RES-BOAT-01,vehicle,rescue_boat,RESCUE_BOAT,2,unit,available,TEAM-WATER-01,"Patna boat staging",25.6060,85.1400,2026-08-01,"REQUIRES_BOAT_OPERATOR",boat_photo.jpg
+RES-AMB-01,vehicle,ambulance,AMBULANCE,1,unit,available,TEAM-MED-01,"Guwahati Civil Hospital",26.1530,91.7680,2026-07-15,"REQUIRES_AMBULANCE_AUTHORIZATION",ambulance_doc.pdf
+RES-MASK-01,equipment,n95_masks,N95_MASKS,650,pieces,available,TEAM-FIRE-01,"Surat Fire Station 2",21.1860,72.8220,2027-01-01,"DISTRIBUTE_WITH_INSTRUCTIONS",mask_stock.csv
+RES-FOOD-01,food,dry_ration,FOOD_PACKS,420,packs,available,TEAM-LOG-01,"Vijayawada Relief Depot",16.5200,80.6320,2026-05-30,"KEEP_DRY",food_stock.csv
+RES-CHLORINE-01,medicine,chlorine_tablets,CHLORINE_TABLETS,1200,strips,available,TEAM-WASH-01,"Muzaffarpur District Store",26.1190,85.3910,2026-10-20,"DOSE_VERIFICATION_REQUIRED",wash_stock.pdf
+RES-ORS-01,medicine,ors_packets,ORS_PACKETS,900,packs,available,TEAM-WASH-01,"Muzaffarpur District Store",26.1190,85.3910,2026-09-12,"PRIORITIZE_CHILDREN",ors_stock.pdf
+RES-TARP-01,shelter,tarpaulins,TARPAULINS,85,sheets,available,TEAM-SHELTER-01,"Cuttack NGO Office",20.4700,85.8890,2026-12-31,"HOUSEHOLD_COUNT_REQUIRED",shelter_stock.csv
+RES-FUEL-01,fuel,diesel,FUEL,300,litres,available,TEAM-LOG-01,"Vijayawada Relief Depot",16.5200,80.6320,2026-04-30,"FLAMMABLE",fuel_register.pdf

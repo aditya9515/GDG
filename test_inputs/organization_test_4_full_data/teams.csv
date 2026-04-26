@@ -1,0 +1,9 @@
+team_id,display_name,role,skills,certifications,availability,status,base_address,base_lat,base_lng,current_lat,current_lng,service_radius_km,capacity,trust_level,notes
+TEAM-WATER-01,Patna Water Rescue,responder,"WATER_RESCUE,FIRST_AID,BOAT_OPERATION","SWIFT_WATER_RESCUE,BLS",now,available,"NDRF staging point Patna",25.6100,85.1410,25.6003,85.1391,35,3,0.95,"Boat crew active."
+TEAM-MED-01,Guwahati Medical Response,medic,"AMBULANCE,MATERNAL_CARE,FIRST_AID","BLS,AMBULANCE_AUTHORIZATION",now,available,"Guwahati Civil Hospital",26.1530,91.7680,26.1482,91.7420,45,4,0.92,"Can support maternal transport."
+TEAM-FIRE-01,Surat Fire Support,responder,"FIRE_RESPONSE,EVACUATION,CROWD_CONTROL","FIRE_SAFETY,SCBA",now,available,"Surat Fire Station 2",21.1860,72.8220,21.1744,72.8299,25,2,0.9,"Smoke masks in vehicle."
+TEAM-LOG-01,Vijayawada Logistics,coordinator,"FOOD_DISTRIBUTION,LOGISTICS,WAREHOUSE","HEAVY_VEHICLE_COORDINATION",shift,available,"Vijayawada Relief Depot",16.5200,80.6320,16.5160,80.6410,60,5,0.87,"Truck dispatch coordination."
+TEAM-WASH-01,Muzaffarpur WASH Unit,responder,"WASH,CHLORINATION,AWARENESS","WASH_RESPONSE",now,available,"Muzaffarpur District Store",26.1190,85.3910,26.1218,85.3675,40,4,0.89,"ORS and chlorine trained."
+TEAM-SHELTER-01,Cuttack Shelter Desk,coordinator,"SHELTER_DISTRIBUTION,CAMP_MANAGEMENT","SPHERE_SHELTER",now,available,"Cuttack NGO Office",20.4700,85.8890,20.4640,85.8840,30,3,0.84,"Can verify household counts."
+TEAM-TRACE-01,Silchar Tracing Desk,coordinator,"TRACING_SUPPORT,COORDINATION,TRANSLATION","PROTECTION_DATA",shift,available,"Silchar Helpdesk",24.8200,92.7900,24.8300,92.7800,30,2,0.82,"Protection-sensitive workflow."
+TEAM-HILL-01,Darjeeling Hill Access,responder,"DEBRIS_ASSESSMENT,FOOT_TEAM,FOOD_DISTRIBUTION","MOUNTAIN_RESPONSE",now,available,"Darjeeling staging yard",27.0500,88.2630,27.0430,88.2650,20,2,0.88,"Small vehicle only."

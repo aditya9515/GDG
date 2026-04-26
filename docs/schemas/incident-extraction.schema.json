@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IncidentExtraction",
+  "type": "object",
+  "required": [
+    "domain",
+    "category",
+    "subcategory",
+    "urgency",
+    "people_affected",
+    "vulnerable_groups",
+    "location_text",
+    "time_to_act_hours",
+    "required_resources",
+    "notes_for_dispatch",
+    "data_quality",
+    "confidence"
+  ],
+  "properties": {
+    "domain": {
+      "type": "string",
+      "enum": [
+        "DISASTER_RELIEF",
+        "HEALTHCARE_EMERGENCY"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "RESCUE",
+        "MEDICAL",
+        "WATER",
+        "SANITATION",
+        "SHELTER",
+        "FOOD",
+        "ESSENTIAL_ITEMS",
+        "LOGISTICS",
+        "PROTECTION",
+        "ELECTRICITY_TELECOM",
+        "MISSING_PERSONS",
+        "MENTAL_HEALTH",
+        "ANIMAL_LIVESTOCK",
+        "COORDINATION"
+      ]
+    },
+    "subcategory": {
+      "type": "string"
+    },
+    "urgency": {
+      "type": "string",
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "UNKNOWN"
+      ]
+    },
+    "people_affected": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "vulnerable_groups": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "CHILDREN_UNDER5",
+          "ELDERLY",
+          "PREGNANT",
+          "DISABILITY",
+          "CHRONIC_ILLNESS",
+          "UNKNOWN",
+          "NONE"
+        ]
+      }
+    },
+    "location_text": {
+      "type": "string"
+    },
+    "time_to_act_hours": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "required_resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "resource_type",
+          "quantity",
+          "unit"
+        ],
+        "properties": {
+          "resource_type": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "notes_for_dispatch": {
+      "type": "string"
+    },
+    "data_quality": {
+      "type": "object",
+      "required": [
+        "missing_location",
+        "missing_quantity",
+        "needs_followup_questions"
+      ],
+      "properties": {
+        "missing_location": {
+          "type": "boolean"
+        },
+        "missing_quantity": {
+          "type": "boolean"
+        },
+        "needs_followup_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

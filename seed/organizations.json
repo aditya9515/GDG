@@ -1,0 +1,14 @@
+[
+  {
+    "org_id": "org-demo-relief",
+    "name": "Demo Relief NGO",
+    "host_uid": "demo-coordinator",
+    "host_email": "demo@reliefops.local",
+    "status": "ACTIVE",
+    "settings": {
+      "country": "India",
+      "default_language": "en",
+      "maps_first": true
+    }
+  }
+]

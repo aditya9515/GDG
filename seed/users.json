@@ -1,0 +1,20 @@
+[
+  {
+    "uid": "demo-coordinator",
+    "email": "demo@reliefops.local",
+    "role": "INCIDENT_COORDINATOR",
+    "enabled": true
+  },
+  {
+    "uid": "demo-medical",
+    "email": "medical@reliefops.local",
+    "role": "MEDICAL_COORDINATOR",
+    "enabled": true
+  },
+  {
+    "uid": "demo-logistics",
+    "email": "logistics@reliefops.local",
+    "role": "LOGISTICS_LEAD",
+    "enabled": true
+  }
+]

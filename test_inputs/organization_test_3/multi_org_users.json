@@ -1,0 +1,31 @@
+{
+  "organizations": [
+    {
+      "org_id": "org-alpha-relief",
+      "name": "Alpha Relief Trust",
+      "host_email": "alpha.host@example.com"
+    },
+    {
+      "org_id": "org-beta-health",
+      "name": "Beta Emergency Health",
+      "host_email": "beta.host@example.com"
+    }
+  ],
+  "memberships": [
+    {
+      "email": "shared.coordinator@example.com",
+      "org_id": "org-alpha-relief",
+      "role": "INCIDENT_COORDINATOR"
+    },
+    {
+      "email": "shared.coordinator@example.com",
+      "org_id": "org-beta-health",
+      "role": "VIEWER"
+    }
+  ],
+  "host_only_scenarios": [
+    "alpha.host@example.com can invite and remove Alpha members.",
+    "shared.coordinator@example.com cannot invite Alpha members.",
+    "beta.host@example.com cannot view Alpha incidents."
+  ]
+}

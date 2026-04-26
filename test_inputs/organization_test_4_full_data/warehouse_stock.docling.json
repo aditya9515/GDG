@@ -1,0 +1,19 @@
+{
+  "source": "warehouse_stock_photo.jpg",
+  "modality": "image",
+  "ocr_confidence": 0.78,
+  "visual_summary": "Warehouse shelf with labelled cartons for tarpaulins, blankets, ORS packets, and masks.",
+  "extracted_text": "TARPAULINS 85 sheets. BLANKETS 140 pieces. ORS 900 packs. N95 MASKS 650 pieces.",
+  "tables": [
+    {
+      "caption": "Visible stock labels",
+      "rows": [
+        ["TARPAULINS", "85", "sheets"],
+        ["BLANKETS", "140", "pieces"],
+        ["ORS_PACKETS", "900", "packs"],
+        ["N95_MASKS", "650", "pieces"]
+      ]
+    }
+  ],
+  "warnings": ["Image evidence should be verified against inventory CSV before dispatch."]
+}

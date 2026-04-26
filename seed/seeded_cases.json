@@ -1,0 +1,712 @@
+[
+  {
+    "case_id": "DR-001",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Flood water rising fast near Shantinagar bridge. 4 people on rooftop incl 1 child. Need rescue boat ASAP.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "RESCUE",
+      "subcategory": "PEOPLE_TRAPPED",
+      "urgency": "CRITICAL",
+      "people_affected": 4,
+      "vulnerable_groups": ["CHILDREN_UNDER5"],
+      "location_text": "Shantinagar bridge",
+      "time_to_act_hours": 2,
+      "required_resources": [{ "resource_type": "RESCUE_BOAT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Rooftop rescue; rising water; child present.",
+      "data_quality": { "missing_location": false, "missing_quantity": false, "needs_followup_questions": [] },
+      "confidence": 0.9
+    }
+  },
+  {
+    "case_id": "DR-002",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Landslide blocked road to Hillview colony. 12 families cut off, no food since yesterday night.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "FOOD",
+      "subcategory": "FOOD_ACCESS_BLOCKED",
+      "urgency": "HIGH",
+      "people_affected": 12,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Hillview colony (road blocked by landslide)",
+      "time_to_act_hours": 12,
+      "required_resources": [{ "resource_type": "FOOD_KITS", "quantity": null, "unit": "kits" }],
+      "notes_for_dispatch": "Access blocked; consider alternate route + small vehicle/foot team.",
+      "data_quality": {
+        "missing_location": false,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Approx. number of people (not families)?", "Any medical emergencies in the group?"]
+      },
+      "confidence": 0.82
+    }
+  },
+  {
+    "case_id": "DR-003",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Relief camp at Govt school has no drinking water since morning. Around 180 people.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "WATER",
+      "subcategory": "NO_DRINKING_WATER",
+      "urgency": "HIGH",
+      "people_affected": 180,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Relief camp at Govt school",
+      "time_to_act_hours": 6,
+      "required_resources": [{ "resource_type": "WATER_TANKER", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "WASH priority; confirm nearest safe source and camp coordinator contact.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Which school / exact address or landmark?", "Any existing water storage capacity?"]
+      },
+      "confidence": 0.74
+    }
+  },
+  {
+    "case_id": "DR-004",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Cyclone damage: 30 houses lost roofs in coastal village. Need tarpaulins and rope today.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "SHELTER",
+      "subcategory": "ROOF_DAMAGE",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Coastal village (roof damage)",
+      "time_to_act_hours": 24,
+      "required_resources": [
+        { "resource_type": "TARPAULINS", "quantity": null, "unit": "sheets" },
+        { "resource_type": "ROPE", "quantity": null, "unit": "bundles" }
+      ],
+      "notes_for_dispatch": "Shelter/NFI distribution; prioritise households with infants/elderly if identified.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Village name and district?", "Approx. households vs people?"]
+      },
+      "confidence": 0.7
+    }
+  },
+  {
+    "case_id": "DR-005",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Bridge collapsed near market road. Ambulance cannot pass. Need alternate route guidance + crowd control.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "LOGISTICS",
+      "subcategory": "INFRASTRUCTURE_BLOCKED",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Market road (bridge collapsed)",
+      "time_to_act_hours": 24,
+      "required_resources": [{ "resource_type": "TRAFFIC_CONTROL_SUPPORT", "quantity": null, "unit": null }],
+      "notes_for_dispatch": "Coordinate with local authorities; map detours; prioritise emergency vehicle access.",
+      "data_quality": {
+        "missing_location": false,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Exact bridge location / nearest junction?"]
+      },
+      "confidence": 0.78
+    }
+  },
+  {
+    "case_id": "DR-006",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Camp toilets overflowing, strong smell, kids falling sick. Need sanitation cleaning and chlorine.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "SANITATION",
+      "subcategory": "TOILETS_OVERFLOW",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["CHILDREN_UNDER5"],
+      "location_text": "Relief camp (toilets overflowing)",
+      "time_to_act_hours": 12,
+      "required_resources": [
+        { "resource_type": "CLEANING_TEAM", "quantity": 1, "unit": "team" },
+        { "resource_type": "CHLORINE_SUPPLIES", "quantity": null, "unit": null }
+      ],
+      "notes_for_dispatch": "WASH response: sanitation + hygiene risk; prevent outbreak.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp / exact location?", "Any confirmed diarrhoea cases?"]
+      },
+      "confidence": 0.76
+    }
+  },
+  {
+    "case_id": "DR-007",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "2 elderly people stuck without medicines in low-lying area, water entered house. Need evacuation + basic supplies.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "RESCUE",
+      "subcategory": "EVACUATION_ASSISTANCE",
+      "urgency": "HIGH",
+      "people_affected": 2,
+      "vulnerable_groups": ["ELDERLY", "CHRONIC_ILLNESS"],
+      "location_text": "Low-lying area (house flooded)",
+      "time_to_act_hours": 6,
+      "required_resources": [{ "resource_type": "EVACUATION_SUPPORT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Evacuation + coordinate medical supplies; elderly at risk.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Exact address / landmark?"]
+      },
+      "confidence": 0.69
+    }
+  },
+  {
+    "case_id": "DR-008",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Need baby food and diapers at camp. Many infants, parents asking since morning.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "ESSENTIAL_ITEMS",
+      "subcategory": "INFANT_SUPPLIES",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["CHILDREN_UNDER5"],
+      "location_text": "Relief camp (infant supplies needed)",
+      "time_to_act_hours": 24,
+      "required_resources": [
+        { "resource_type": "BABY_FOOD", "quantity": null, "unit": null },
+        { "resource_type": "DIAPERS", "quantity": null, "unit": "packs" }
+      ],
+      "notes_for_dispatch": "Prioritise households with infants; track distribution quantities.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp?", "Approx. number of infants?"]
+      },
+      "confidence": 0.67
+    }
+  },
+  {
+    "case_id": "DR-009",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Missing person: Ramesh, 38, last seen near bus stand during evacuation. Family searching.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "MISSING_PERSONS",
+      "subcategory": "MISSING_DURING_EVACUATION",
+      "urgency": "MEDIUM",
+      "people_affected": 1,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Bus stand (during evacuation)",
+      "time_to_act_hours": 48,
+      "required_resources": [{ "resource_type": "TRACING_SUPPORT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Start tracing workflow; do not store unnecessary personal identifiers in public logs.",
+      "data_quality": {
+        "missing_location": false,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Any photo / clothing details shared privately?", "Contact number for family?"]
+      },
+      "confidence": 0.6
+    }
+  },
+  {
+    "case_id": "DR-010",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Heatwave: water tanker needed for slum cluster, people fainting. No power for pumps.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "WATER",
+      "subcategory": "HEATWAVE_WATER_SHORTAGE",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["ELDERLY", "CHILDREN_UNDER5", "UNKNOWN"],
+      "location_text": "Slum cluster (heatwave, no power for pumps)",
+      "time_to_act_hours": 6,
+      "required_resources": [
+        { "resource_type": "WATER_TANKER", "quantity": 1, "unit": "unit" },
+        { "resource_type": "POWER_BACKUP", "quantity": null, "unit": null }
+      ],
+      "notes_for_dispatch": "WASH emergency; consider cooling centre and medical check.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Exact location?", "Approx. households/people?"]
+      },
+      "confidence": 0.72
+    }
+  },
+  {
+    "case_id": "DR-011",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Roadside relief point running out of ORS packets. Diarrhoea cases reported in camp.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "MEDICAL",
+      "subcategory": "OUTBREAK_RISK_DIARRHOEA",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["CHILDREN_UNDER5"],
+      "location_text": "Roadside relief point / camp area",
+      "time_to_act_hours": 12,
+      "required_resources": [{ "resource_type": "ORS_PACKETS", "quantity": null, "unit": "packs" }],
+      "notes_for_dispatch": "Health + WASH coordination; monitor for outbreak escalation.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp/relief point?", "Approx. number of diarrhoea cases?"]
+      },
+      "confidence": 0.7
+    }
+  },
+  {
+    "case_id": "DR-012",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Electricity down for 3 days, mobile network weak. Need charging station and info desk at camp.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "ELECTRICITY_TELECOM",
+      "subcategory": "POWER_AND_CONNECTIVITY",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Relief camp (power/network down)",
+      "time_to_act_hours": 48,
+      "required_resources": [{ "resource_type": "CHARGING_STATION", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Enable communications; helps coordination and family contact.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp?"]
+      },
+      "confidence": 0.66
+    }
+  },
+  {
+    "case_id": "DR-013",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Two boats already sent to same lane, but more calls coming from nearby lane. Might be same families. Please verify duplicates.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "COORDINATION",
+      "subcategory": "POSSIBLE_DUPLICATE_REPORTS",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Nearby lanes (same locality)",
+      "time_to_act_hours": 24,
+      "required_resources": [{ "resource_type": "VERIFICATION_CALLBACK", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Run duplicate detection; verify location and families before dispatch.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["What is the lane name/locality?", "Any unique landmarks?"]
+      },
+      "confidence": 0.62
+    }
+  },
+  {
+    "case_id": "DR-014",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Collapsed wall at relief camp entrance; injuries possible. Need debris removal and first-aid support.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "LOGISTICS",
+      "subcategory": "DEBRIS_REMOVAL",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Relief camp entrance (collapsed wall)",
+      "time_to_act_hours": 6,
+      "required_resources": [
+        { "resource_type": "DEBRIS_REMOVAL_TEAM", "quantity": 1, "unit": "team" },
+        { "resource_type": "FIRST_AID_TEAM", "quantity": 1, "unit": "team" }
+      ],
+      "notes_for_dispatch": "Clear access; treat injuries; prevent secondary harm.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp? Any confirmed injured count?"]
+      },
+      "confidence": 0.73
+    }
+  },
+  {
+    "case_id": "DR-015",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Wildfire smoke heavy, breathing issues in hamlet. Need masks and evacuation advice.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "PROTECTION",
+      "subcategory": "SMOKE_EXPOSURE",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["ELDERLY", "CHRONIC_ILLNESS", "CHILDREN_UNDER5"],
+      "location_text": "Hamlet near wildfire area",
+      "time_to_act_hours": 12,
+      "required_resources": [{ "resource_type": "N95_MASKS", "quantity": null, "unit": "pieces" }],
+      "notes_for_dispatch": "Distribute masks; coordinate evacuation advisory; monitor respiratory cases.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Exact hamlet name/location?"]
+      },
+      "confidence": 0.68
+    }
+  },
+  {
+    "case_id": "DR-016",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Food packets delivered yesterday but new families arrived overnight. Need updated count and distribution plan.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "FOOD",
+      "subcategory": "DISTRIBUTION_UPDATE",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Relief camp / affected area (new arrivals)",
+      "time_to_act_hours": 24,
+      "required_resources": [{ "resource_type": "ASSESSMENT_TEAM", "quantity": 1, "unit": "team" }],
+      "notes_for_dispatch": "Rapid reassessment; avoid duplication; adjust plan.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Where is the camp/area?", "Estimated new arrivals?"]
+      },
+      "confidence": 0.64
+    }
+  },
+  {
+    "case_id": "DR-017",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Need blankets tonight, temperatures dropping. Elderly shivering in temporary shelter.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "SHELTER",
+      "subcategory": "COLD_WEATHER_ITEMS",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["ELDERLY"],
+      "location_text": "Temporary shelter (cold night)",
+      "time_to_act_hours": 12,
+      "required_resources": [{ "resource_type": "BLANKETS", "quantity": null, "unit": "pieces" }],
+      "notes_for_dispatch": "Night-time risk; prioritise elderly/children.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which shelter location?", "Approx. number needing blankets?"]
+      },
+      "confidence": 0.71
+    }
+  },
+  {
+    "case_id": "DR-018",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Water source contaminated after flood; people using river water. Need chlorine tablets and awareness.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "WATER",
+      "subcategory": "WATER_CONTAMINATION_RISK",
+      "urgency": "HIGH",
+      "people_affected": null,
+      "vulnerable_groups": ["CHILDREN_UNDER5", "ELDERLY", "UNKNOWN"],
+      "location_text": "Flood-affected area (river water used)",
+      "time_to_act_hours": 24,
+      "required_resources": [
+        { "resource_type": "CHLORINE_TABLETS", "quantity": null, "unit": "strips" },
+        { "resource_type": "AWARENESS_TEAM", "quantity": 1, "unit": "team" }
+      ],
+      "notes_for_dispatch": "WASH: safe water priority; prevent diarrhoeal outbreak.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which village/ward?", "Any reported diarrhoea?"]
+      },
+      "confidence": 0.74
+    }
+  },
+  {
+    "case_id": "DR-019",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Livestock stranded in flooded cowshed; owner requesting help to move animals.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "ANIMAL_LIVESTOCK",
+      "subcategory": "LIVESTOCK_EVACUATION",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Flooded cowshed",
+      "time_to_act_hours": 24,
+      "required_resources": [{ "resource_type": "ANIMAL_RESCUE_SUPPORT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Coordinate animal rescue and local authorities; ensure human safety first.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Exact location?", "How many animals?"]
+      },
+      "confidence": 0.58
+    }
+  },
+  {
+    "case_id": "DR-020",
+    "label": "DISASTER_RELIEF",
+    "raw_input": "Aftershock fear, people staying outside. Need psychosocial support and safe shelter guidance.",
+    "expected": {
+      "domain": "DISASTER_RELIEF",
+      "category": "MENTAL_HEALTH",
+      "subcategory": "PSYCHOSOCIAL_SUPPORT",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Earthquake-affected locality",
+      "time_to_act_hours": 48,
+      "required_resources": [{ "resource_type": "PSYCHOSOCIAL_TEAM", "quantity": 1, "unit": "team" }],
+      "notes_for_dispatch": "Provide guidance + helpline; coordinate shelter safety assessment.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which locality?", "Any injuries or special needs?"]
+      },
+      "confidence": 0.6
+    }
+  },
+  {
+    "case_id": "HE-001",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Urgent blood needed: B+ 2 units for surgery tonight. Patient in district hospital.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "BLOOD_REQUIREMENT",
+      "urgency": "CRITICAL",
+      "people_affected": 1,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "District hospital",
+      "time_to_act_hours": 6,
+      "required_resources": [{ "resource_type": "BLOOD_B_POSITIVE", "quantity": 2, "unit": "units" }],
+      "notes_for_dispatch": "Validate blood group and hospital contact via secure channel.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Hospital name/city?", "Replacement donor required?"]
+      },
+      "confidence": 0.78
+    }
+  },
+  {
+    "case_id": "HE-002",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Ambulance required for pregnant woman in labour, roads waterlogged. Need safe transport now.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "MATERNAL_EMERGENCY_TRANSPORT",
+      "urgency": "CRITICAL",
+      "people_affected": 1,
+      "vulnerable_groups": ["PREGNANT"],
+      "location_text": "Waterlogged area (pregnant woman in labour)",
+      "time_to_act_hours": 2,
+      "required_resources": [{ "resource_type": "AMBULANCE", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "High urgency; consider boat/4x4 if ambulance cannot reach.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Exact pickup location?", "Nearest facility?"]
+      },
+      "confidence": 0.79
+    }
+  },
+  {
+    "case_id": "HE-003",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Oxygen concentrator needed for elderly COPD patient, power outages frequent. Family requesting backup.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "OXYGEN_SUPPORT",
+      "urgency": "HIGH",
+      "people_affected": 1,
+      "vulnerable_groups": ["ELDERLY", "CHRONIC_ILLNESS"],
+      "location_text": "Home care (elderly COPD patient, power outages)",
+      "time_to_act_hours": 24,
+      "required_resources": [
+        { "resource_type": "OXYGEN_CONCENTRATOR", "quantity": 1, "unit": "unit" },
+        { "resource_type": "POWER_BACKUP", "quantity": 1, "unit": "unit" }
+      ],
+      "notes_for_dispatch": "Confirm clinical need; ensure safe power backup guidance.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Exact location?", "Any doctor prescription?"]
+      },
+      "confidence": 0.7
+    }
+  },
+  {
+    "case_id": "HE-004",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Snakebite reported in village, antivenom not available locally. Need urgent referral support.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "SNAKEBITE_REFERRAL",
+      "urgency": "CRITICAL",
+      "people_affected": 1,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Village clinic (snakebite, antivenom unavailable)",
+      "time_to_act_hours": 2,
+      "required_resources": [{ "resource_type": "URGENT_TRANSPORT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Time-critical; route to facility with antivenom; coordinate transport.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which village?", "Time since bite?"]
+      },
+      "confidence": 0.75
+    }
+  },
+  {
+    "case_id": "HE-005",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Child with high fever and dehydration at camp. Needs ORS and medical check immediately.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "PAEDIATRIC_DEHYDRATION",
+      "urgency": "HIGH",
+      "people_affected": 1,
+      "vulnerable_groups": ["CHILDREN_UNDER5"],
+      "location_text": "Relief camp (child fever + dehydration)",
+      "time_to_act_hours": 6,
+      "required_resources": [{ "resource_type": "MEDICAL_TEAM_VISIT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Assess dehydration severity; ensure safe fluids and referral if needed.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp?", "Any danger signs?"]
+      },
+      "confidence": 0.73
+    }
+  },
+  {
+    "case_id": "HE-006",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Dialysis patient missed 2 sessions due to transport disruption. Need priority transport to city hospital.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "CHRONIC_CARE_TRANSPORT",
+      "urgency": "HIGH",
+      "people_affected": 1,
+      "vulnerable_groups": ["CHRONIC_ILLNESS"],
+      "location_text": "Transport disruption area (dialysis missed)",
+      "time_to_act_hours": 24,
+      "required_resources": [{ "resource_type": "TRANSPORT_SUPPORT", "quantity": 1, "unit": "unit" }],
+      "notes_for_dispatch": "Coordinate transport; validate next dialysis slot.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Pickup location?", "Hospital name and appointment time?"]
+      },
+      "confidence": 0.66
+    }
+  },
+  {
+    "case_id": "HE-007",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Accident near highway, 3 injured, bleeding. Need first responder and ambulance.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "TRAUMA_MULTI_CASUALTY",
+      "urgency": "CRITICAL",
+      "people_affected": 3,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Highway accident site",
+      "time_to_act_hours": 1,
+      "required_resources": [
+        { "resource_type": "FIRST_RESPONDER_TEAM", "quantity": 1, "unit": "team" },
+        { "resource_type": "AMBULANCE", "quantity": 1, "unit": "unit" }
+      ],
+      "notes_for_dispatch": "Immediate trauma response; confirm exact kilometre marker/landmark.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": false,
+        "needs_followup_questions": ["Exact location / nearest landmark?"]
+      },
+      "confidence": 0.77
+    }
+  },
+  {
+    "case_id": "HE-008",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Insulin finished for diabetic elderly in shelter; pharmacy closed. Need supply today.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "MEDICATION_SUPPLY",
+      "urgency": "HIGH",
+      "people_affected": 1,
+      "vulnerable_groups": ["ELDERLY", "CHRONIC_ILLNESS"],
+      "location_text": "Shelter (insulin needed)",
+      "time_to_act_hours": 12,
+      "required_resources": [{ "resource_type": "INSULIN_SUPPLY", "quantity": null, "unit": null }],
+      "notes_for_dispatch": "Medication continuity; verify dosage carefully; avoid sharing medical details widely.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Insulin type and dosage?", "Which shelter?"]
+      },
+      "confidence": 0.68
+    }
+  },
+  {
+    "case_id": "HE-009",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Suspected dengue cluster in ward; many with fever. Need rapid awareness and referral guidance.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MEDICAL",
+      "subcategory": "OUTBREAK_ALERT",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["UNKNOWN"],
+      "location_text": "Ward/locality (suspected dengue cluster)",
+      "time_to_act_hours": 48,
+      "required_resources": [{ "resource_type": "AWARENESS_TEAM", "quantity": 1, "unit": "team" }],
+      "notes_for_dispatch": "Public health alert; coordinate with health authorities; avoid misinformation.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which ward/city?", "Any lab confirmations?"]
+      },
+      "confidence": 0.6
+    }
+  },
+  {
+    "case_id": "HE-010",
+    "label": "HEALTHCARE_EMERGENCY",
+    "raw_input": "Mental health crisis: anxious children in camp after flood, nightmares, panic. Need counselling session.",
+    "expected": {
+      "domain": "HEALTHCARE_EMERGENCY",
+      "category": "MENTAL_HEALTH",
+      "subcategory": "CHILD_PSYCHOSOCIAL_SUPPORT",
+      "urgency": "MEDIUM",
+      "people_affected": null,
+      "vulnerable_groups": ["CHILDREN_UNDER5", "UNKNOWN"],
+      "location_text": "Relief camp (child psychosocial support)",
+      "time_to_act_hours": 72,
+      "required_resources": [{ "resource_type": "PSYCHOSOCIAL_TEAM", "quantity": 1, "unit": "team" }],
+      "notes_for_dispatch": "Schedule psychosocial support; coordinate with camp management.",
+      "data_quality": {
+        "missing_location": true,
+        "missing_quantity": true,
+        "needs_followup_questions": ["Which camp?", "Any severe cases needing immediate attention?"]
+      },
+      "confidence": 0.62
+    }
+  }
+]

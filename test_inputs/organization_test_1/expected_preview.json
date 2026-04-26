@@ -1,0 +1,33 @@
+{
+  "expected_drafts": [
+    {
+      "draft_type": "INCIDENT",
+      "category": "RESCUE",
+      "severity": 5,
+      "location_required": false,
+      "location_confidence": "EXACT",
+      "geo": {
+        "lat": 25.5941,
+        "lng": 85.1376
+      },
+      "features": ["ROOFTOP_RESCUE", "WATERLOGGED_APPROACH", "river bridge"]
+    },
+    {
+      "draft_type": "TEAM",
+      "capability_tags": ["RESCUE", "WATER_RESCUE", "FIRST_AID"],
+      "base_geo": {
+        "lat": 25.61,
+        "lng": 85.141
+      }
+    },
+    {
+      "draft_type": "RESOURCE",
+      "resource_type": "RESCUE_BOAT",
+      "quantity_available": 2,
+      "location": {
+        "lat": 25.61,
+        "lng": 85.141
+      }
+    }
+  ]
+}

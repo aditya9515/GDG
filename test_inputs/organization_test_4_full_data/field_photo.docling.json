@@ -1,0 +1,15 @@
+{
+  "source": "field_photo.jpg",
+  "modality": "image",
+  "ocr_confidence": 0.81,
+  "detected_languages": ["hi", "en"],
+  "visual_summary": "Flooded street near bridge with people visible on an upper balcony.",
+  "extracted_text": "बचाव नाव चाहिए. Shantinagar bridge. 6 people waiting.",
+  "location_candidates": [
+    { "label": "Shantinagar Bridge, Patna", "lat": 25.5941, "lng": 85.1376, "confidence": 0.82 }
+  ],
+  "tokens": [
+    { "type": "NEED", "category": "RESCUE", "summary": "Boat rescue likely needed near Shantinagar bridge." },
+    { "type": "LOCATION_HINT", "summary": "Bridge landmark visible in handwritten note." }
+  ]
+}

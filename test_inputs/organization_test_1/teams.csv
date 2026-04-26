@@ -1,0 +1,7 @@
+team_id,display_name,capability_tags,member_ids,service_radius_km,base_label,base_lat,base_lng,current_label,current_lat,current_lng,availability_status,reliability_score
+TEAM-RESCUE-1,"River Rescue Team","RESCUE,WATER_RESCUE,FIRST_AID,EVACUATION","vol-001,vol-002",60,"Patna rescue base",25.6100,85.1410,"Patna rescue base",25.6100,85.1410,AVAILABLE,0.91
+TEAM-MED-1,"Mobile Medical Team","MEDICAL,FIRST_AID,MATERNAL_CARE,AMBULANCE","vol-003,vol-004",45,"Guwahati health post",26.1500,91.7500,"Guwahati health post",26.1500,91.7500,AVAILABLE,0.88
+TEAM-FIRE-1,"Fire Response Team","FIRE_RESPONSE,EVACUATION,SMOKE_EXPOSURE","vol-005,vol-006",40,"Bhubaneswar fire station",20.3020,85.8210,"Bhubaneswar fire station",20.3020,85.8210,AVAILABLE,0.86
+TEAM-LOG-1,"Logistics Convoy","LOGISTICS,FOOD_DISTRIBUTION,SHELTER_DISTRIBUTION","vol-007,vol-008",80,"Cuttack warehouse",20.4680,85.8790,"Cuttack warehouse",20.4680,85.8790,AVAILABLE,0.84
+TEAM-TRANS-1,"Translation Support Team","TRANSLATION,COMMUNITY_HELPDESK","vol-009",30,"Kochi helpdesk",9.9360,76.2730,"Kochi helpdesk",9.9360,76.2730,AVAILABLE,0.82
+TEAM-HILL-1,"Hill Access Response Team","DEBRIS_ASSESSMENT,FOOD_DISTRIBUTION,MEDICAL_SUPPORT","vol-010,vol-011",55,"Darjeeling response base",27.0360,88.2630,"Darjeeling response base",27.0360,88.2630,AVAILABLE,0.85

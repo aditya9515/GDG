@@ -1,0 +1,10 @@
+resource_id,owning_team_id,resource_type,quantity_available,location_label,location_lat,location_lng,current_label,current_lat,current_lng,constraints
+RES-BOAT-1,TEAM-RESCUE-1,RESCUE_BOAT,2,"Patna rescue base",25.6100,85.1410,"Patna rescue base",25.6100,85.1410,"REQUIRES_BOAT_OPERATOR"
+RES-AMB-1,TEAM-MED-1,AMBULANCE,1,"Guwahati health post",26.1500,91.7500,"Guwahati health post",26.1500,91.7500,"REQUIRES_DRIVER"
+RES-MEDKIT-1,TEAM-MED-1,MEDICAL_KIT,14,"Guwahati health post",26.1500,91.7500,"Guwahati health post",26.1500,91.7500,""
+RES-FOOD-1,TEAM-LOG-1,FOOD_PACKS,500,"Cuttack warehouse",20.4680,85.8790,"Cuttack warehouse",20.4680,85.8790,""
+RES-SHELTER-1,TEAM-LOG-1,TARPAULINS,150,"Cuttack warehouse",20.4680,85.8790,"Cuttack warehouse",20.4680,85.8790,""
+RES-BLANKET-1,TEAM-LOG-1,BLANKETS,300,"Cuttack warehouse",20.4680,85.8790,"Cuttack warehouse",20.4680,85.8790,""
+RES-FUEL-1,TEAM-LOG-1,FUEL,900,"Cuttack warehouse",20.4680,85.8790,"Cuttack warehouse",20.4680,85.8790,"CONTROLLED_STOCK"
+RES-BARRICADE-1,TEAM-TRANS-1,BARRICADES,24,"Kochi helpdesk",9.9360,76.2730,"Central depot gate",9.9312,76.2673,"CROWD_CONTROL_ONLY"
+RES-HILL-FOOD-1,TEAM-HILL-1,FOOD_PACKS,180,"Darjeeling response base",27.0360,88.2630,"Darjeeling response base",27.0360,88.2630,"SMALL_VEHICLE_REQUIRED"
